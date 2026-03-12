@@ -1,19 +1,33 @@
 // services/miner.js
+// CapStash phone miner — Whirlpool-512 PoW
+// Imports from whirlpool.js (verified against blocks 1 and 4454)
+
+import {
+  capstashPoWHash,
+  buildHeader,
+  setNonce,
+  setTime,
+  bitsToTarget,
+  hashMeetsTarget,
+  bytesToHex,
+} from './whirlpool';
+
 import { getBlockTemplate, submitBlock } from './getBlockTemplate';
-import { buildHeader, targetFromBits } from './blockHeader';
-import { getPoWHash, toHex } from './whirlpool';
 
 let mining = false;
-let onHashUpdate = null;   // callback for UI hashrate display
-let onBlockFound = null;   // callback when block solved
+let onHashUpdate = null;   // callback(hashrate: number)
+let onBlockFound = null;   // callback({ height, hash, result })
 
-const NONCE_BATCH = 4096;  // check tip every 4096 nonces
+const NONCE_BATCH = 4096;  // nonces per tip-check / hashrate update
 
-export function startMining({ rigIp, rpcUser, rpcPass, onHash, onBlock }) {
+// ── Public API ─────────────────────────────────────────────────────────────
+
+export function startMining({ nodeConfig, onHash, onBlock }) {
+  if (mining) return;
   mining = true;
   onHashUpdate = onHash || (() => {});
   onBlockFound = onBlock || (() => {});
-  mineLoop(rigIp, rpcUser, rpcPass);
+  mineLoop(nodeConfig);
 }
 
 export function stopMining() {
@@ -22,88 +36,103 @@ export function stopMining() {
   onBlockFound = null;
 }
 
-async function mineLoop(ip, user, pass) {
+// ── Mining loop ────────────────────────────────────────────────────────────
+
+async function mineLoop(nodeConfig) {
   while (mining) {
     try {
-      // 1. Fetch template from node
-      const template = await getBlockTemplate(ip, user, pass);
-      const { bits, prevHash, merkleRoot, height, coinbaseTxn, transactions } = template;
+      // 1. Fetch block template
+      const template = await getBlockTemplate(nodeConfig);
+      const {
+        version,
+        previousblockhash,
+        transactions,
+        coinbaseaux,
+        bits,
+        height,
+        curtime,
+      } = template;
 
-      const target = targetFromBits(bits);
+      // Coinbase transaction is first in template.transactions
+      // or provided separately depending on node version
+      const coinbaseTxn = template.coinbasetxn?.data || transactions[0]?.data || '';
+      const txList = template.transactions || [];
+
+      const target = bitsToTarget(parseInt(bits, 16));
+
+      // 2. Build initial header (reused across nonce loop with setNonce/setTime)
+      const header = buildHeader(
+        version,
+        previousblockhash,
+        template.merkleroot,
+        curtime,
+        parseInt(bits, 16),
+        0,
+      );
+
       let nonce = 0;
-      let nTime = Math.floor(Date.now() / 1000);
+      let nTime = curtime;
       let hashCount = 0;
       let startTime = Date.now();
+      let prevHash = previousblockhash;
 
-      // 2. Nonce loop
+      // 3. Nonce loop
       while (mining && nonce <= 0xFFFFFFFF) {
-        // Build 80-byte header
-        const header = buildHeader({
-          version: template.version,
-          prevHash,
-          merkleRoot,
-          nTime,
-          nBits: bits,
-          nonce,
-        });
+        setNonce(header, nonce);
 
-        // 3. Hash: Whirlpool-512 → XOR fold → 32 bytes
-        const hash = getPoWHash(header);
+        const hash = capstashPoWHash(header);
         hashCount++;
 
-        // 4. Compare hash vs target (both as Uint8Array, big-endian)
-        if (compareBE(hash, target) <= 0) {
-          // BLOCK FOUND!
-          const blockHex = serializeBlock(header, coinbaseTxn, transactions);
-          const result = await submitBlock(ip, user, pass, blockHex);
-          onBlockFound({ height, hash: toHex(hash), result });
+        if (hashMeetsTarget(hash, target)) {
+          // BLOCK FOUND
+          const blockHex = serializeBlock(header, coinbaseTxn, txList);
+          const result = await submitBlock(nodeConfig, blockHex);
+          onBlockFound({ height, hash: bytesToHex(hash), result });
+          break; // restart with new template
         }
 
         nonce++;
 
-        // 5. Every NONCE_BATCH: update hashrate, refresh nTime, check tip
         if (nonce % NONCE_BATCH === 0) {
           const elapsed = (Date.now() - startTime) / 1000;
-          const hashrate = hashCount / elapsed;
-          onHashUpdate(hashrate);
+          onHashUpdate(elapsed > 0 ? hashCount / elapsed : 0);
 
-          // Update nTime
+          // Refresh nTime
           nTime = Math.floor(Date.now() / 1000);
+          setTime(header, nTime);
 
-          // Check if chain tip changed (new block from network)
+          // Check if chain tip changed
           try {
-            const freshTemplate = await getBlockTemplate(ip, user, pass);
-            if (freshTemplate.prevHash !== prevHash) {
-              break; // New block on network — restart with new template
+            const fresh = await getBlockTemplate(nodeConfig);
+            if (fresh.previousblockhash !== prevHash) {
+              break; // new block on network — get fresh template
             }
-          } catch (e) { /* continue mining on current template */ }
+          } catch (_) {
+            // network hiccup — keep mining on current template
+          }
         }
       }
+
+      // Nonce exhausted (extremely unlikely at current difficulty) — restart
     } catch (err) {
-      console.warn('[MINER] Template fetch error:', err.message);
-      // Wait 5s before retrying
+      console.warn('[MINER] Error:', err.message);
       await new Promise(r => setTimeout(r, 5000));
     }
   }
 }
 
-// Compare two Uint8Arrays as big-endian 256-bit numbers
-function compareBE(a, b) {
-  for (let i = 0; i < 32; i++) {
-    if (a[i] < b[i]) return -1;
-    if (a[i] > b[i]) return 1;
-  }
-  return 0;
-}
+// ── Block serialization ────────────────────────────────────────────────────
 
-// Serialize full block for submitblock RPC
 function serializeBlock(header, coinbaseTxn, transactions) {
-  // header (80 bytes hex) + varint(txCount) + coinbase + txs
-  const headerHex = toHex(header);
+  const headerHex = bytesToHex(header);
   const txCount = 1 + transactions.length;
-  const varint = txCount < 0xfd
-    ? txCount.toString(16).padStart(2, '0')
-    : 'fd' + txCount.toString(16).padStart(4, '0');
+  const varint = encodeVarint(txCount);
   const txHexes = [coinbaseTxn, ...transactions.map(t => t.data)].join('');
   return headerHex + varint + txHexes;
+}
+
+function encodeVarint(n) {
+  if (n < 0xfd) return n.toString(16).padStart(2, '0');
+  if (n <= 0xffff) return 'fd' + n.toString(16).padStart(4, '0');
+  return 'fe' + n.toString(16).padStart(8, '0');
 }
