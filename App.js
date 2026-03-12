@@ -1,6 +1,5 @@
 // App.js
 // CapStash Wallet — Wallet of the Wasteland
-
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, Animated,
@@ -9,7 +8,6 @@ import {
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-
 import WalletScreen   from './screens/WalletScreen';
 import MinerScreen    from './screens/MinerScreen';
 import ExplorerScreen from './screens/ExplorerScreen';
@@ -17,23 +15,22 @@ import NetworkScreen  from './screens/NetworkScreen';
 import SoloScreen     from './screens/SoloScreen';
 import FieldManual    from './components/FieldManual';
 import SetupMenu      from './components/Setupmenu';
-import { getBlockCount, getMiningInfo, getNetworkHashPs } from './services/rpc';
+import { getBlockCount, getMiningInfo, getNetworkHashPs, loadAppMode } from './services/rpc';
 import Colors    from './theme/colors';
 import Typography from './theme/typography';
 
 const Tab = createBottomTabNavigator();
 
 // ── App mode ─────────────────────────────────────────────────
-// 'DRIFTER' = companion wallet via Tailscale node
+// 'DRIFTER'  = companion wallet via Tailscale node
 // 'WANDERER' = self-contained node (future)
-const APP_MODE = 'DRIFTER';
 
 // ── Default node config ──────────────────────────────────────
 const DEFAULT_NODE = {
-  ip:          '100.x.x.x',          // ← your Tailscale IP here (no port)
-  port:        '8332',               // ← port as its own field
-  rpcuser:     'nukauser',           // ← your rpcuser
-  rpcpassword: 'wasteland',          // ← your rpcpassword
+  ip:          '100.x.x.x',    // ← your Tailscale IP here (no port)
+  port:        '8332',         // ← port as its own field
+  rpcuser:     'capstashuser', // ← your rpcuser
+  rpcpassword: 'wasteland',    // ← your rpcpassword
 };
 
 export default function App() {
@@ -44,9 +41,15 @@ export default function App() {
   const [showManual,  setShowManual]  = useState(false);
   const [showSetup,   setShowSetup]   = useState(false);
   const [nodeConfig,  setNodeConfig]  = useState(DEFAULT_NODE);
+  const [appMode,     setAppMode]     = useState('DRIFTER');
 
   const tickerAnim = useRef(new Animated.Value(0)).current;
   const blinkAnim  = useRef(new Animated.Value(1)).current;
+
+  // ── Load persisted app mode on boot ─────────────────────
+  useEffect(() => {
+    loadAppMode().then(m => { if (m) setAppMode(m); });
+  }, []);
 
   // ── Ticker — seamless looping ────────────────────────────
   useEffect(() => {
@@ -60,7 +63,7 @@ export default function App() {
     ).start();
   }, []);
 
-  // Cursor blink
+  // ── Cursor blink ─────────────────────────────────────────
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
@@ -110,10 +113,10 @@ export default function App() {
   };
 
   const statusColor = isOnline ? Colors.green : Colors.red;
-  const modeLabel   = isOnline ? APP_MODE : `${APP_MODE} OFFLINE`;
+  const modeLabel   = isOnline ? appMode : `${appMode} OFFLINE`;
 
   // Duplicate the segment so the loop seam is invisible
-  const tickerSegment = `  ⚠  BLK #${blockHeight}   NET ${formatHash(networkHash)}   DIFF ${formatDiff(difficulty)}   STAY VIGILANT ${APP_MODE}   `;
+  const tickerSegment = `  ⚠  BLK #${blockHeight}   NET ${formatHash(networkHash)}   DIFF ${formatDiff(difficulty)}   STAY VIGILANT ${appMode}   `;
   const tickerText    = tickerSegment + tickerSegment;
   const tickerWidth   = tickerText.length * 7.2;
 
@@ -121,37 +124,29 @@ export default function App() {
     <SafeAreaProvider>
       <NavigationContainer>
         <StatusBar barStyle="dark-content" backgroundColor={Colors.black} />
-
         <SafeAreaView style={styles.container} edges={['top']}>
 
           {/* ── App Header ── */}
           <View style={styles.header}>
-
             {/* Left — logo */}
             <View>
               <Text style={styles.logo}>CapStash</Text>
               <Text style={styles.logoSub}>WALLET OF THE WASTELAND</Text>
             </View>
-
             {/* Right — mode indicator + B.S.G. */}
             <View style={styles.headerRight}>
-
               {/* Mode/status — tap opens setup menu */}
               <TouchableOpacity
                 style={styles.statusRow}
                 onPress={() => setShowSetup(true)}
               >
                 <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-                <Text style={[styles.statusText, { color: statusColor }]}>
-                  {modeLabel}
-                </Text>
+                <Text style={[styles.statusText, { color: statusColor }]}>{modeLabel}</Text>
               </TouchableOpacity>
-
-              {/* Dweller's Survival Guide */}
+              {/* Banjo's Survival Guide */}
               <TouchableOpacity style={styles.manualBtn} onPress={() => setShowManual(true)}>
                 <Text style={styles.manualBtnText}>B.S.G.</Text>
               </TouchableOpacity>
-
             </View>
           </View>
 
@@ -185,11 +180,11 @@ export default function App() {
               tabBarLabelStyle:        styles.tabLabel,
               tabBarIcon: ({ focused }) => {
                 const icons = {
-                  VAULT:      '⬡',
-                  'P.B.G.':   '⚒',
-                  'B.D.T.':   '⛓',
-                  SIGNAL:     '∿',
-                  'SURVIVOR %':'↯',
+                  VAULT:        '⬡',
+                  'P.B.G.':     '⚒',
+                  'B.D.T.':     '⛓',
+                  SIGNAL:       '∿',
+                  'SURVIVOR %': '↯',
                 };
                 return (
                   <Text style={{
@@ -228,10 +223,11 @@ export default function App() {
           onClose={() => setShowSetup(false)}
           isOnline={isOnline}
           nodeConfig={nodeConfig}
+          appMode={appMode}
           onNodeConfigChange={setNodeConfig}
         />
 
-        {/* ── Dweller's Survival Guide ── */}
+        {/* ── Banjo's Survival Guide ── */}
         <FieldManual visible={showManual} onClose={() => setShowManual(false)} />
 
       </NavigationContainer>

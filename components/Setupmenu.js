@@ -4,15 +4,15 @@
 // User enters: IP Address, Port, Username, Password (separately)
 // On save: stored in encrypted storage via rpc.saveNodeConfig()
 // Format saved: { ip: '100.x.x.x', port: '8332', rpcuser, rpcpassword }
-// buildRpcUrl() in rpc.js combines them at call time → http://ip:port
+// buildRpcUrl() in rpc.js combines them at call time → http://ip:port/
 //
 // Props:
 //   visible            {bool}
 //   onClose            {fn}
 //   isOnline           {bool}
 //   nodeConfig         {object}  — current config from App.js state
+//   appMode            {string}  — 'DRIFTER' | 'WANDERER' from App.js state
 //   onNodeConfigChange {fn}      — App.js setNodeConfig
-
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, Modal, ScrollView, TouchableOpacity,
@@ -33,9 +33,10 @@ export default function SetupMenu({
   onClose,
   isOnline,
   nodeConfig,
+  appMode,
   onNodeConfigChange,
 }) {
-  const [activeSection, setActiveSection] = useState('node'); // node open by default
+  const [activeSection, setActiveSection] = useState('node');
 
   // ── Four clean fields ──────────────────────────────────
   const [ip,       setIp]      = useState('');
@@ -47,37 +48,35 @@ export default function SetupMenu({
   const [showPass, setShowPass]= useState(false);
 
   // ── Status ─────────────────────────────────────────────
-  const [testStatus,  setTestStatus]  = useState(null); // null|'testing'|'ok'|'fail'
+  const [testStatus,  setTestStatus]  = useState(null);
   const [testMessage, setTestMessage] = useState('');
-  const [saveStatus,  setSaveStatus]  = useState(null); // null|'saving'|'saved'|'error'
+  const [saveStatus,  setSaveStatus]  = useState(null);
 
   // ── Load existing config when menu opens ───────────────
   useEffect(() => {
     if (!visible) return;
-    // Try encrypted storage first, fall back to prop
     loadNodeConfig().then(stored => {
       const cfg = stored || nodeConfig;
       if (cfg) {
-        // If ip has port baked in (legacy), split it out
         if (cfg.ip?.includes(':')) {
           const [rawIp, rawPort] = cfg.ip.split(':');
-          setIp(rawIp   || '');
+          setIp(rawIp    || '');
           setPort(rawPort || '8332');
         } else {
-          setIp(cfg.ip   || '');
+          setIp(cfg.ip    || '');
           setPort(cfg.port || '8332');
         }
         setUsername(cfg.rpcuser     || '');
         setPassword(cfg.rpcpassword || '');
       }
     });
-    // Reset status on open
     setTestStatus(null);
     setTestMessage('');
     setSaveStatus(null);
   }, [visible]);
 
   const statusColor = isOnline ? Colors.green : Colors.red;
+  const currentMode = appMode || 'DRIFTER';
 
   // ── Build config object from current fields ────────────
   const buildConfig = () => ({
@@ -126,7 +125,6 @@ export default function SetupMenu({
     try {
       const saved = await saveNodeConfig(buildConfig());
       setSaveStatus('saved');
-      // Push new config up to App.js so all screens refresh
       onNodeConfigChange?.(saved);
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (e) {
@@ -175,7 +173,7 @@ export default function SetupMenu({
             <View>
               <Text style={styles.modeTag}>ACTIVE MODE</Text>
               <Text style={[styles.modeName, { color: statusColor, textShadowColor: statusColor }]}>
-                DRIFTER
+                {currentMode}
               </Text>
               <Text style={styles.modeDesc}>COMPANION WALLET · SYNCS VIA TAILSCALE</Text>
             </View>
@@ -205,7 +203,6 @@ export default function SetupMenu({
             open={activeSection === 'node'}
             onPress={() => toggleSection('node')}
           />
-
           {activeSection === 'node' && (
             <View style={styles.sectionBody}>
 
@@ -333,7 +330,6 @@ export default function SetupMenu({
                 }
               </TouchableOpacity>
 
-              {/* Test result message */}
               {testMessage ? (
                 <Text style={[
                   styles.testMessage,
@@ -372,7 +368,6 @@ export default function SetupMenu({
                 ▸ TEST THE CONNECTION FIRST, THEN SAVE{'\n'}
                 ▸ SAVE UPDATES ALL SCREENS IMMEDIATELY
               </Text>
-
             </View>
           )}
 
@@ -386,7 +381,6 @@ export default function SetupMenu({
             open={activeSection === 'security'}
             onPress={() => toggleSection('security')}
           />
-
           {activeSection === 'security' && (
             <View style={styles.sectionBody}>
               <View style={styles.comingSoonCard}>
@@ -421,7 +415,6 @@ export default function SetupMenu({
             open={activeSection === 'errors'}
             onPress={() => toggleSection('errors')}
           />
-
           {activeSection === 'errors' && (
             <View style={styles.sectionBody}>
               {[
@@ -453,13 +446,12 @@ export default function SetupMenu({
             open={activeSection === 'info'}
             onPress={() => toggleSection('info')}
           />
-
           {activeSection === 'info' && (
             <View style={styles.sectionBody}>
               {[
                 ['APP',     'CAPSTASH WALLET'],
                 ['VERSION', APP_VERSION],
-                ['MODE',    'DRIFTER'],
+                ['MODE',    currentMode],
                 ['NETWORK', 'CAPSTASH MAINNET'],
                 ['POW',     'WHIRLPOOL-512 XOR/256'],
                 ['REWARD',  '1 CAP / BLOCK'],
@@ -488,12 +480,8 @@ export default function SetupMenu({
 function SectionHeader({ label, open, onPress }) {
   return (
     <TouchableOpacity style={styles.sectionHeaderRow} onPress={onPress}>
-      <Text style={[styles.sectionHeaderText, open && { color: Colors.green }]}>
-        {label}
-      </Text>
-      <Text style={[styles.sectionArrow, open && { color: Colors.green }]}>
-        {open ? '▲' : '▼'}
-      </Text>
+      <Text style={[styles.sectionHeaderText, open && { color: Colors.green }]}>{label}</Text>
+      <Text style={[styles.sectionArrow, open && { color: Colors.green }]}>{open ? '▲' : '▼'}</Text>
     </TouchableOpacity>
   );
 }
@@ -504,18 +492,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.black,
   },
-
-  // Header
   header: {
-    flexDirection:    'row',
-    justifyContent:   'space-between',
-    alignItems:       'flex-start',
-    paddingHorizontal:16,
-    paddingTop:       52,
-    paddingBottom:    12,
-    borderBottomWidth:1,
-    borderBottomColor:Colors.green,
-    backgroundColor:  Colors.surfaceLight,
+    flexDirection:     'row',
+    justifyContent:    'space-between',
+    alignItems:        'flex-start',
+    paddingHorizontal: 16,
+    paddingTop:        52,
+    paddingBottom:     12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.green,
+    backgroundColor:   Colors.surfaceLight,
   },
   headerTitle: {
     ...Typography.large,
@@ -542,13 +528,10 @@ const styles = StyleSheet.create({
     color:         Colors.greenDim,
     letterSpacing: 1,
   },
-
   scroll: {
     flex:    1,
     padding: 14,
   },
-
-  // Mode banner
   modeBanner: {
     flexDirection:   'row',
     justifyContent:  'space-between',
@@ -588,8 +571,6 @@ const styles = StyleSheet.create({
     ...Typography.micro,
     letterSpacing: 1,
   },
-
-  // Wanderer teaser
   wandererCard: {
     borderWidth:     1,
     borderColor:     Colors.amberDim,
@@ -609,14 +590,11 @@ const styles = StyleSheet.create({
     color:      Colors.amberDim,
     lineHeight: 15,
   },
-
   divider: {
     height:          1,
     backgroundColor: Colors.border,
     marginVertical:  2,
   },
-
-  // Section headers
   sectionHeaderRow: {
     flexDirection:     'row',
     justifyContent:    'space-between',
@@ -636,8 +614,6 @@ const styles = StyleSheet.create({
   sectionBody: {
     paddingBottom: 12,
   },
-
-  // How-to box
   howToBox: {
     borderWidth:     1,
     borderColor:     Colors.border,
@@ -656,8 +632,6 @@ const styles = StyleSheet.create({
     color:      Colors.greenDim,
     lineHeight: 17,
   },
-
-  // Fields
   fieldLabel: {
     ...Typography.micro,
     color:         Colors.green,
@@ -693,18 +667,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   togglePassBtn: {
-    borderWidth:     1,
-    borderColor:     Colors.borderDim,
-    paddingHorizontal:10,
-    justifyContent:  'center',
+    borderWidth:       1,
+    borderColor:       Colors.borderDim,
+    paddingHorizontal: 10,
+    justifyContent:    'center',
   },
   togglePassText: {
     ...Typography.micro,
     color:         Colors.greenDim,
     letterSpacing: 1,
   },
-
-  // Test button
   testBtn: {
     marginTop:      14,
     borderWidth:    1,
@@ -714,8 +686,8 @@ const styles = StyleSheet.create({
     minHeight:      40,
     justifyContent: 'center',
   },
-  testBtnOk:   { borderColor: Colors.green    },
-  testBtnFail: { borderColor: Colors.red      },
+  testBtnOk:   { borderColor: Colors.green },
+  testBtnFail: { borderColor: Colors.red   },
   testBtnText: {
     ...Typography.labelSmall,
     color:         Colors.amber,
@@ -728,8 +700,6 @@ const styles = StyleSheet.create({
     textAlign:     'center',
     lineHeight:    14,
   },
-
-  // Save button
   saveBtn: {
     marginTop:      8,
     borderWidth:    1,
@@ -753,8 +723,6 @@ const styles = StyleSheet.create({
     lineHeight:    16,
     letterSpacing: 0.5,
   },
-
-  // Info box (generic)
   infoBox: {
     borderWidth:     1,
     borderColor:     Colors.border,
@@ -767,8 +735,6 @@ const styles = StyleSheet.create({
     color:      Colors.greenDim,
     lineHeight: 16,
   },
-
-  // Coming soon card
   comingSoonCard: {
     borderWidth:     1,
     borderColor:     Colors.amberDim,
@@ -787,8 +753,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom:  5,
   },
-
-  // Error rows
   errorRow: {
     borderWidth:     1,
     borderColor:     Colors.border,
@@ -817,8 +781,6 @@ const styles = StyleSheet.create({
     color:      Colors.greenDim,
     lineHeight: 14,
   },
-
-  // Info rows
   infoRow: {
     flexDirection:   'row',
     justifyContent:  'space-between',

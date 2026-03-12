@@ -1,25 +1,17 @@
 // screens/MinerScreen.js
+// W.O.W. — P.B.G. tab: rig management, mining stats
+// Credentials sourced from unified nodeConfig prop (set via SetupMenu → rpc.js)
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  RefreshControl,
-  Modal,
-  TextInput,
-  Alert,
-  ActivityIndicator,
-  Animated,
-  Vibration,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView,
+  RefreshControl, Modal, TextInput, Alert, ActivityIndicator,
+  Animated, Vibration,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import EncryptedStorage from 'react-native-encrypted-storage';
 import { getMiningInfo } from '../services/rpc';
-import Colors from '../theme/colors';
+import Colors    from '../theme/colors';
 import Typography from '../theme/typography';
-import Spacing from '../theme/spacing';
+import Spacing   from '../theme/spacing';
 
 console.log('=== MINER DIAG ===');
 console.log('Colors:', typeof Colors, Colors);
@@ -45,27 +37,6 @@ async function saveRigs(rigs) {
     await AsyncStorage.setItem(RIGS_KEY, JSON.stringify(rigs));
   } catch (e) {
     console.warn('saveRigs error:', e);
-  }
-}
-
-async function loadCredentials() {
-  try {
-    const user = await EncryptedStorage.getItem('rpc_user');
-    const pass = await EncryptedStorage.getItem('rpc_pass');
-    if (user && pass) return { user, pass };
-    return null;
-  } catch (e) {
-    console.warn('loadCredentials error:', e);
-    return null;
-  }
-}
-
-async function saveCredentials(user, pass) {
-  try {
-    await EncryptedStorage.setItem('rpc_user', user);
-    await EncryptedStorage.setItem('rpc_pass', pass);
-  } catch (e) {
-    console.warn('saveCredentials error:', e);
   }
 }
 
@@ -96,9 +67,7 @@ function RigCard({ rig, onToggle, onLongPress }) {
         <Text style={styles.rigName}>{rig.name}</Text>
         <View style={[styles.statusDot, { backgroundColor: borderColor }]} />
       </View>
-
       <Text style={styles.rigIp}>{rig.ip}:{rig.port || '8332'}</Text>
-
       {rig.enabled && rig.online && (
         <View style={styles.rigStats}>
           <View style={styles.rigStatItem}>
@@ -111,17 +80,13 @@ function RigCard({ rig, onToggle, onLongPress }) {
           </View>
           <View style={styles.rigStatItem}>
             <Text style={styles.rigStatLabel}>DIFF</Text>
-            <Text style={styles.rigStatValue}>
-              {rig.difficulty ? rig.difficulty.toFixed(3) : '—'}
-            </Text>
+            <Text style={styles.rigStatValue}>{rig.difficulty ? rig.difficulty.toFixed(3) : '—'}</Text>
           </View>
         </View>
       )}
-
       {rig.enabled && !rig.online && (
         <Text style={styles.rigOffline}>OFFLINE — tap to retry</Text>
       )}
-
       {!rig.enabled && (
         <Text style={styles.rigDisabled}>DISABLED — tap to enable</Text>
       )}
@@ -130,23 +95,17 @@ function RigCard({ rig, onToggle, onLongPress }) {
 }
 
 // ── Main Screen ─────────────────────────────────────────────
-export default function MinerScreen() {
-  const [rigs, setRigs] = useState([]);
-  const [refreshing, setRefreshing] = useState(false);
+export default function MinerScreen({ nodeConfig, isOnline }) {
+  const [rigs,         setRigs]         = useState([]);
+  const [refreshing,   setRefreshing]   = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showCredModal, setShowCredModal] = useState(false);
-  const [connecting, setConnecting] = useState(false);
+  const [connecting,   setConnecting]   = useState(false);
 
   // Add rig inputs
   const [newRigName, setNewRigName] = useState('');
-  const [newRigIp, setNewRigIp] = useState('');
+  const [newRigIp,   setNewRigIp]   = useState('');
   const [newRigPort, setNewRigPort] = useState('8332');
 
-  // Credential inputs
-  const [credUser, setCredUser] = useState('');
-  const [credPass, setCredPass] = useState('');
-
-  // Polling ref
   const pollRef = useRef(null);
 
   // ── Load rigs on mount ──────────────────────────────────
@@ -160,43 +119,38 @@ export default function MinerScreen() {
     };
   }, []);
 
-  // ── Start polling when rigs change ──────────────────────
+  // ── Start polling when rigs or nodeConfig change ─────────
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
-
     const enabledRigs = rigs.filter(r => r.enabled);
-    if (enabledRigs.length === 0) return;
+    if (enabledRigs.length === 0 || !nodeConfig) return;
 
     const poll = async () => {
-      const creds = await loadCredentials();
-      if (!creds) return;
-
       let updated = false;
       const newRigs = await Promise.all(
         rigs.map(async (rig) => {
           if (!rig.enabled) return rig;
           try {
-            const nodeConfig = {
+            const rigConfig = {
               ip:          rig.ip,
               port:        rig.port || '8332',
-              rpcuser:     creds.user,
-              rpcpassword: creds.pass,
+              rpcuser:     nodeConfig.rpcuser,
+              rpcpassword: nodeConfig.rpcpassword,
             };
-            const info = await getMiningInfo(nodeConfig);
+            const info = await getMiningInfo(rigConfig);
             updated = true;
             return {
               ...rig,
               online:     true,
-              blocks:     info.blocks     || 0,
-              hashrate:   info.networkhashps || 0,
-              difficulty: info.difficulty || 0,
+              blocks:     info.blocks          || 0,
+              hashrate:   info.networkhashps   || 0,
+              difficulty: info.difficulty      || 0,
             };
           } catch (e) {
             return { ...rig, online: false };
           }
         })
       );
-
       if (updated) {
         setRigs(newRigs);
         await saveRigs(newRigs);
@@ -205,11 +159,10 @@ export default function MinerScreen() {
 
     poll(); // immediate first poll
     pollRef.current = setInterval(poll, 5000);
-
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [rigs.length, rigs.filter(r => r.enabled).length]);
+  }, [rigs.length, rigs.filter(r => r.enabled).length, nodeConfig]);
 
   // ── Pull to refresh ─────────────────────────────────────
   const onRefresh = useCallback(async () => {
@@ -249,35 +202,39 @@ export default function MinerScreen() {
     );
   }, [rigs]);
 
+  // ── Open add modal — pre-fill IP from nodeConfig ────────
+  const openAddModal = () => {
+    setNewRigIp(nodeConfig?.ip || '');
+    setNewRigPort('8332');
+    setNewRigName('');
+    setShowAddModal(true);
+  };
+
   // ── Confirm add rig ─────────────────────────────────────
   const confirmAddRig = async () => {
     if (!newRigIp.trim()) {
       Alert.alert('Error', 'IP address is required');
       return;
     }
+    if (!nodeConfig?.rpcuser || !nodeConfig?.rpcpassword) {
+      Alert.alert(
+        'No Credentials',
+        'Configure your node via the Setup Menu first.\nTap the mode indicator in the header.'
+      );
+      return;
+    }
 
     setConnecting(true);
-
     try {
-      const creds = await loadCredentials();
-      if (!creds) {
-        Alert.alert('No Credentials', 'Set your RPC credentials first.');
-        setConnecting(false);
-        setShowAddModal(false);
-        setShowCredModal(true);
-        return;
-      }
-
-      const nodeConfig = {
+      const rigConfig = {
         ip:          newRigIp.trim(),
         port:        newRigPort.trim() || '8332',
-        rpcuser:     creds.user,
-        rpcpassword: creds.pass,
+        rpcuser:     nodeConfig.rpcuser,
+        rpcpassword: nodeConfig.rpcpassword,
       };
 
       // Validate connection
-      const info = await getMiningInfo(nodeConfig);
-
+      const info = await getMiningInfo(rigConfig);
       const newRig = {
         id:         Date.now().toString(),
         name:       newRigName.trim() || `Rig ${rigs.length + 1}`,
@@ -285,21 +242,15 @@ export default function MinerScreen() {
         port:       newRigPort.trim() || '8332',
         enabled:    true,
         online:     true,
-        blocks:     info.blocks       || 0,
+        blocks:     info.blocks        || 0,
         hashrate:   info.networkhashps || 0,
-        difficulty: info.difficulty   || 0,
+        difficulty: info.difficulty    || 0,
       };
 
       const updated = [...rigs, newRig];
       setRigs(updated);
       await saveRigs(updated);
-
-      // Reset inputs
-      setNewRigName('');
-      setNewRigIp('');
-      setNewRigPort('8332');
       setShowAddModal(false);
-
       Alert.alert('Connected', `${newRig.name} added successfully`);
     } catch (e) {
       Alert.alert(
@@ -309,19 +260,6 @@ export default function MinerScreen() {
     } finally {
       setConnecting(false);
     }
-  };
-
-  // ── Save credentials ───────────────────────────────────
-  const confirmSaveCreds = async () => {
-    if (!credUser.trim() || !credPass.trim()) {
-      Alert.alert('Error', 'Both username and password are required');
-      return;
-    }
-    await saveCredentials(credUser.trim(), credPass.trim());
-    setCredUser('');
-    setCredPass('');
-    setShowCredModal(false);
-    Alert.alert('Saved', 'RPC credentials stored securely');
   };
 
   // ── Render ──────────────────────────────────────────────
@@ -345,13 +283,23 @@ export default function MinerScreen() {
           </Text>
         </View>
 
+        {/* Credentials source notice */}
+        <View style={styles.credNotice}>
+          <Text style={styles.credNoticeText}>
+            🔑  CREDENTIALS · MANAGED VIA SETUP MENU
+          </Text>
+          <Text style={styles.credNoticeHint}>
+            {nodeConfig?.rpcuser
+              ? `ACTIVE: ${nodeConfig.ip}:${nodeConfig.port || '8332'}`
+              : 'NOT CONFIGURED — TAP MODE INDICATOR IN HEADER'}
+          </Text>
+        </View>
+
         {/* Rig List */}
         {rigs.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyText}>NO RIGS CONFIGURED</Text>
-            <Text style={styles.emptySubtext}>
-              Set credentials, then add your first rig
-            </Text>
+            <Text style={styles.emptySubtext}>Tap + ADD RIG to connect your first rig</Text>
           </View>
         ) : (
           rigs.map((rig) => (
@@ -365,18 +313,11 @@ export default function MinerScreen() {
         )}
       </ScrollView>
 
-      {/* Bottom Buttons */}
+      {/* Bottom Button */}
       <View style={styles.buttonRow}>
         <TouchableOpacity
-          style={styles.credButton}
-          onPress={() => setShowCredModal(true)}
-        >
-          <Text style={styles.credButtonText}>🔑 CREDENTIALS</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
           style={styles.addButton}
-          onPress={() => setShowAddModal(true)}
+          onPress={openAddModal}
         >
           <Text style={styles.addButtonText}>+ ADD RIG</Text>
         </TouchableOpacity>
@@ -392,7 +333,6 @@ export default function MinerScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>ADD NEW RIG</Text>
-
             <TextInput
               style={styles.modalInput}
               placeholder="Rig Name (optional)"
@@ -400,7 +340,6 @@ export default function MinerScreen() {
               value={newRigName}
               onChangeText={setNewRigName}
             />
-
             <TextInput
               style={styles.modalInput}
               placeholder="IP Address (e.g. 100.x.x.x)"
@@ -410,7 +349,6 @@ export default function MinerScreen() {
               keyboardType="default"
               autoCapitalize="none"
             />
-
             <TextInput
               style={styles.modalInput}
               placeholder="Port (default: 8332)"
@@ -420,7 +358,10 @@ export default function MinerScreen() {
               keyboardType="numeric"
               maxLength={5}
             />
-
+            <Text style={styles.modalCredHint}>
+              Using credentials from Setup Menu:{' '}
+              <Text style={{ color: Colors.green }}>{nodeConfig?.rpcuser || 'NOT SET'}</Text>
+            </Text>
             {connecting ? (
               <View style={styles.connectingRow}>
                 <ActivityIndicator color={Colors.green} />
@@ -439,7 +380,6 @@ export default function MinerScreen() {
                 >
                   <Text style={styles.modalCancelText}>CANCEL</Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity
                   style={styles.modalConfirm}
                   onPress={confirmAddRig}
@@ -448,62 +388,6 @@ export default function MinerScreen() {
                 </TouchableOpacity>
               </View>
             )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── Credentials Modal ──────────────────────────── */}
-      <Modal
-        visible={showCredModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowCredModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>RPC CREDENTIALS</Text>
-            <Text style={styles.modalSubtitle}>
-              These are stored securely on-device
-            </Text>
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="RPC Username"
-              placeholderTextColor="#666"
-              value={credUser}
-              onChangeText={setCredUser}
-              autoCapitalize="none"
-            />
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="RPC Password"
-              placeholderTextColor="#666"
-              value={credPass}
-              onChangeText={setCredPass}
-              secureTextEntry
-              autoCapitalize="none"
-            />
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={() => {
-                  setShowCredModal(false);
-                  setCredUser('');
-                  setCredPass('');
-                }}
-              >
-                <Text style={styles.modalCancelText}>CANCEL</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalConfirm}
-                onPress={confirmSaveCreds}
-              >
-                <Text style={styles.modalConfirmText}>SAVE</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
       </Modal>
@@ -534,203 +418,212 @@ const styles = StyleSheet.create({
     color: Colors.greenDark,
     marginTop: 4,
   },
+
+  // Credentials notice
+  credNotice: {
+    borderWidth:     1,
+    borderColor:     Colors.greenDark,
+    backgroundColor: Colors.surface,
+    padding:         Spacing.sm,
+    marginBottom:    Spacing.md,
+  },
+  credNoticeText: {
+    ...Typography.caption,
+    color:         Colors.amber,
+    letterSpacing: 1,
+    fontSize:      11,
+  },
+  credNoticeHint: {
+    ...Typography.caption,
+    color:     Colors.greenDark,
+    marginTop: 3,
+    fontSize:  10,
+  },
+
   // Empty state
   emptyState: {
-    alignItems: 'center',
+    alignItems:    'center',
     paddingVertical: Spacing.xl * 2,
   },
   emptyText: {
     ...Typography.heading,
-    color: Colors.green,
+    color:    Colors.green,
     fontSize: 16,
   },
   emptySubtext: {
     ...Typography.caption,
-    color: Colors.greenDark,
+    color:     Colors.greenDark,
     marginTop: 8,
   },
+
   // Rig card
   rigCard: {
     backgroundColor: Colors.blackMid,
     borderLeftWidth: 3,
-    borderRadius: 6,
-    padding: Spacing.md,
-    marginBottom: Spacing.sm,
+    borderRadius:    6,
+    padding:         Spacing.md,
+    marginBottom:    Spacing.sm,
   },
   rigHeader: {
-    flexDirection: 'row',
+    flexDirection:  'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems:     'center',
   },
   rigName: {
     ...Typography.heading,
-    color: Colors.green,
+    color:    Colors.green,
     fontSize: 15,
   },
   statusDot: {
-    width: 10,
-    height: 10,
+    width:        10,
+    height:       10,
     borderRadius: 5,
   },
   rigIp: {
     ...Typography.caption,
-    color: Colors.greenDark,
+    color:     Colors.greenDark,
     marginTop: 2,
-    fontSize: 11,
+    fontSize:  11,
   },
   rigStats: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: Spacing.sm,
-    paddingTop: Spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Colors.greenDark,
+    flexDirection:   'row',
+    justifyContent:  'space-between',
+    marginTop:       Spacing.sm,
+    paddingTop:      Spacing.sm,
+    borderTopWidth:  1,
+    borderTopColor:  Colors.greenDark,
   },
   rigStatItem: {
     alignItems: 'center',
-    flex: 1,
+    flex:       1,
   },
   rigStatLabel: {
     ...Typography.caption,
-    color: Colors.greenDark,
-    fontSize: 9,
+    color:         Colors.greenDark,
+    fontSize:      9,
     letterSpacing: 1,
   },
   rigStatValue: {
     ...Typography.mono,
-    color: Colors.green,
-    fontSize: 13,
+    color:     Colors.green,
+    fontSize:  13,
     marginTop: 2,
   },
   rigOffline: {
     ...Typography.caption,
-    color: Colors.amber,
+    color:     Colors.amber,
     marginTop: Spacing.sm,
-    fontSize: 11,
+    fontSize:  11,
   },
   rigDisabled: {
     ...Typography.caption,
-    color: Colors.greenDim,
+    color:     Colors.greenDim,
     marginTop: Spacing.sm,
-    fontSize: 11,
+    fontSize:  11,
   },
+
   // Bottom buttons
   buttonRow: {
-    flexDirection: 'row',
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: Spacing.md,
+    position:        'absolute',
+    bottom:          0,
+    left:            0,
+    right:           0,
+    padding:         Spacing.md,
     backgroundColor: Colors.blackLight,
-    borderTopWidth: 1,
-    borderTopColor: Colors.greenDark,
-    gap: Spacing.sm,
-  },
-  credButton: {
-    flex: 1,
-    backgroundColor: Colors.blackMid,
-    paddingVertical: 14,
-    borderRadius: 6,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.greenDark,
-  },
-  credButtonText: {
-    ...Typography.heading,
-    color: Colors.amber,
-    fontSize: 13,
+    borderTopWidth:  1,
+    borderTopColor:  Colors.greenDark,
   },
   addButton: {
-    flex: 1,
     backgroundColor: Colors.green,
     paddingVertical: 14,
-    borderRadius: 6,
-    alignItems: 'center',
+    borderRadius:    6,
+    alignItems:      'center',
   },
   addButtonText: {
     ...Typography.heading,
-    color: Colors.black,
+    color:    Colors.black,
     fontSize: 13,
   },
+
   // Modal
   modalOverlay: {
-    flex: 1,
+    flex:            1,
     backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
-    padding: Spacing.lg,
+    justifyContent:  'center',
+    padding:         Spacing.lg,
   },
   modalContent: {
     backgroundColor: Colors.blackMid,
-    borderRadius: 8,
-    padding: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.greenDark,
+    borderRadius:    8,
+    padding:         Spacing.lg,
+    borderWidth:     1,
+    borderColor:     Colors.greenDark,
   },
   modalTitle: {
     ...Typography.display,
-    color: Colors.green,
-    fontSize: 18,
+    color:        Colors.green,
+    fontSize:     18,
     marginBottom: Spacing.sm,
-  },
-  modalSubtitle: {
-    ...Typography.caption,
-    color: Colors.greenDark,
-    marginBottom: Spacing.md,
-    fontSize: 11,
   },
   modalInput: {
-    backgroundColor: Colors.blackLight,
-    color: Colors.green,
-    fontFamily: 'SpaceMono-Regular',
-    fontSize: 14,
+    backgroundColor:   Colors.blackLight,
+    color:             Colors.green,
+    fontFamily:        'SpaceMono-Regular',
+    fontSize:          14,
     paddingHorizontal: Spacing.md,
-    paddingVertical: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: Colors.greenDark,
-    marginBottom: Spacing.sm,
+    paddingVertical:   12,
+    borderRadius:      6,
+    borderWidth:       1,
+    borderColor:       Colors.greenDark,
+    marginBottom:      Spacing.sm,
+  },
+  modalCredHint: {
+    ...Typography.micro,
+    color:         Colors.greenDim,
+    letterSpacing: 0.5,
+    marginBottom:  Spacing.sm,
+    fontSize:      10,
   },
   modalButtons: {
     flexDirection: 'row',
-    gap: Spacing.sm,
-    marginTop: Spacing.sm,
+    gap:           Spacing.sm,
+    marginTop:     Spacing.sm,
   },
   modalCancel: {
-    flex: 1,
+    flex:          1,
     paddingVertical: 12,
-    borderRadius: 6,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.greenDark,
+    borderRadius:  6,
+    alignItems:    'center',
+    borderWidth:   1,
+    borderColor:   Colors.greenDark,
   },
   modalCancelText: {
     ...Typography.heading,
-    color: Colors.greenDark,
+    color:    Colors.greenDark,
     fontSize: 13,
   },
   modalConfirm: {
-    flex: 1,
+    flex:            1,
     backgroundColor: Colors.green,
     paddingVertical: 12,
-    borderRadius: 6,
-    alignItems: 'center',
+    borderRadius:    6,
+    alignItems:      'center',
   },
   modalConfirmText: {
     ...Typography.heading,
-    color: Colors.black,
+    color:    Colors.black,
     fontSize: 13,
   },
   connectingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection:  'row',
+    alignItems:     'center',
     justifyContent: 'center',
     paddingVertical: 14,
-    gap: 10,
+    gap:            10,
   },
   connectingText: {
     ...Typography.heading,
-    color: Colors.green,
+    color:    Colors.green,
     fontSize: 13,
   },
 });
