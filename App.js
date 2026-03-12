@@ -113,7 +113,6 @@ export default function App() {
   };
 
   const statusColor = isOnline ? Colors.green : Colors.red;
-  const modeLabel   = isOnline ? appMode : `${appMode} OFFLINE`;
 
   // Duplicate the segment so the loop seam is invisible
   const tickerSegment = `  ⚠  BLK #${blockHeight}   NET ${formatHash(networkHash)}   DIFF ${formatDiff(difficulty)}   STAY VIGILANT ${appMode}   `;
@@ -140,8 +139,9 @@ export default function App() {
                 style={styles.statusRow}
                 onPress={() => setShowSetup(true)}
               >
-                <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-                <Text style={[styles.statusText, { color: statusColor }]}>{modeLabel}</Text>
+                <Text style={[styles.modeText, { color: statusColor, textShadowColor: statusColor }]}>
+                  {appMode}
+                </Text>
               </TouchableOpacity>
               {/* Banjo's Survival Guide */}
               <TouchableOpacity style={styles.manualBtn} onPress={() => setShowManual(true)}>
@@ -276,14 +276,12 @@ const styles = StyleSheet.create({
     alignItems:    'center',
     gap:           4,
   },
-  statusDot: {
-    width:        7,
-    height:       7,
-    borderRadius: 3.5,
-  },
-  statusText: {
-    ...Typography.micro,
-    letterSpacing: 1,
+  modeText: {
+    ...Typography.heading,
+    fontSize:         22,
+    letterSpacing:    3,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
   },
   manualBtn: {
     borderWidth:       1,
