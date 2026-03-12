@@ -112,7 +112,7 @@ export default function App() {
     return d.toFixed(3);
   };
 
-  const statusColor = isOnline ? Colors.green : Colors.red;
+  const statusColor = isOnline ? Colors.green : Colors.amber;
 
   // Duplicate the segment so the loop seam is invisible
   const tickerSegment = `  ⚠  BLK #${blockHeight}   NET ${formatHash(networkHash)}   DIFF ${formatDiff(difficulty)}   STAY VIGILANT ${appMode}   `;
