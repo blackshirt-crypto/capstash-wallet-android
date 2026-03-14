@@ -1,629 +1,558 @@
-// screens/MinerScreen.js
-// W.O.W. — P.B.G. tab: rig management, mining stats
-// Credentials sourced from unified nodeConfig prop (set via SetupMenu → rpc.js)
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+/**
+ * MinerScreen.js — P.B.G. (Pip Boy Grinder)
+ * v2.0 — C++ NDK miner + Grinder network monitor
+ *
+ * Sections:
+ *   1. Mining Address (QR scan + display)
+ *   2. Hashrate dashboard (big numbers)
+ *   3. Stats row (blocks, uptime, threads)
+ *   4. Thread config + Start/Stop
+ *   5. Grinders (remote miner monitoring)
+ */
+
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  RefreshControl, Modal, TextInput, Alert, ActivityIndicator,
-  Animated, Vibration,
+  View, Text, TouchableOpacity, StyleSheet,
+  ScrollView, TextInput, Alert, NativeModules,
+  NativeEventEmitter, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getMiningInfo } from '../services/rpc';
-import Colors    from '../theme/colors';
-import Typography from '../theme/typography';
-import Spacing   from '../theme/spacing';
+import { loadNodeConfig } from '../services/rpc';
+import QRScannerModal from '../components/QRScannerModal';
 
-console.log('=== MINER DIAG ===');
-console.log('Colors:', typeof Colors, Colors);
-console.log('Colors.green:', Colors?.green);
-console.log('Typography:', typeof Typography, Typography);
+const { CapStashMiner } = NativeModules;
+const MinerEmitter = CapStashMiner ? new NativeEventEmitter(CapStashMiner) : null;
 
-// ── Storage Helpers ─────────────────────────────────────────
-const RIGS_KEY = 'capstash_rigs';
+// ── Storage keys ──────────────────────────────────────────────────────────────
+const KEY_MINING_ADDR = 'mining_address';
+const KEY_THREADS     = 'miner_threads';
+const KEY_GRINDERS    = 'miner_grinders';
 
-async function loadRigs() {
-  try {
-    const json = await AsyncStorage.getItem(RIGS_KEY);
-    if (!json) return [];
-    return JSON.parse(json);
-  } catch (e) {
-    console.warn('loadRigs error:', e);
-    return [];
-  }
-}
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const C = {
+  bg:       '#0a0f0a',
+  surface:  '#0d1a0d',
+  border:   '#1a3a1a',
+  green:    '#00ff41',
+  greenDim: '#00aa2a',
+  amber:    '#ffb000',
+  muted:    '#4a7a4a',
+  danger:   '#ff4444',
+  white:    '#c8ffc8',
+};
 
-async function saveRigs(rigs) {
-  try {
-    await AsyncStorage.setItem(RIGS_KEY, JSON.stringify(rigs));
-  } catch (e) {
-    console.warn('saveRigs error:', e);
-  }
-}
+const F = {
+  heading: { fontFamily: 'VT323-Regular' },
+  mono:    { fontFamily: 'ShareTechMono-Regular' },
+};
 
-// ── Formatting Helpers ──────────────────────────────────────
-function formatHashrate(hps) {
-  if (!hps || hps === 0) return '0 H/s';
-  if (hps >= 1e12) return (hps / 1e12).toFixed(2) + ' TH/s';
-  if (hps >= 1e9)  return (hps / 1e9).toFixed(2)  + ' GH/s';
-  if (hps >= 1e6)  return (hps / 1e6).toFixed(2)  + ' MH/s';
-  if (hps >= 1e3)  return (hps / 1e3).toFixed(2)  + ' KH/s';
-  return hps.toFixed(2) + ' H/s';
-}
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const truncAddr = (a) => a ? `${a.slice(0,10)}...${a.slice(-8)}` : '—';
+const fmtHashrate = (hr) => {
+  if (!hr || hr === 0) return ['—', ''];
+  if (hr >= 1_000_000_000) return [(hr / 1_000_000_000).toFixed(3), 'GH/s'];
+  if (hr >= 1_000_000)     return [(hr / 1_000_000).toFixed(2),     'MH/s'];
+  if (hr >= 1_000)         return [(hr / 1_000).toFixed(2),         'KH/s'];
+  return [hr.toFixed(0), 'H/s'];
+};
+const fmtUptime = (secs) => {
+  if (!secs) return '00:00:00';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+};
 
-// ── Rig Card Component ─────────────────────────────────────
-function RigCard({ rig, onToggle, onLongPress }) {
-  const borderColor = rig.enabled
-    ? (rig.online ? Colors.green : Colors.amber)
-    : Colors.greenDim;
+// ── Component ─────────────────────────────────────────────────────────────────
+export default function MinerScreen() {
+  // Mining state
+  const [isMining,      setIsMining]      = useState(false);
+  const [hashrate,      setHashrate]      = useState(0);
+  const [blocksFound,   setBlocksFound]   = useState(0);
+  const [uptime,        setUptime]        = useState(0);
+  const [threads,       setThreads]       = useState('4');
+  const [miningAddress, setMiningAddress] = useState(null);
+  const [nodeConfig,    setNodeConfig]    = useState(null);
+  const [scannerOpen,   setScannerOpen]   = useState(false);
 
-  return (
-    <TouchableOpacity
-      style={[styles.rigCard, { borderLeftColor: borderColor }]}
-      onPress={() => onToggle(rig)}
-      onLongPress={() => onLongPress(rig)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.rigHeader}>
-        <Text style={styles.rigName}>{rig.name}</Text>
-        <View style={[styles.statusDot, { backgroundColor: borderColor }]} />
-      </View>
-      <Text style={styles.rigIp}>{rig.ip}:{rig.port || '8332'}</Text>
-      {rig.enabled && rig.online && (
-        <View style={styles.rigStats}>
-          <View style={styles.rigStatItem}>
-            <Text style={styles.rigStatLabel}>BLOCKS</Text>
-            <Text style={styles.rigStatValue}>{rig.blocks || '—'}</Text>
-          </View>
-          <View style={styles.rigStatItem}>
-            <Text style={styles.rigStatLabel}>HASHRATE</Text>
-            <Text style={styles.rigStatValue}>{formatHashrate(rig.hashrate)}</Text>
-          </View>
-          <View style={styles.rigStatItem}>
-            <Text style={styles.rigStatLabel}>DIFF</Text>
-            <Text style={styles.rigStatValue}>{rig.difficulty ? rig.difficulty.toFixed(3) : '—'}</Text>
-          </View>
-        </View>
-      )}
-      {rig.enabled && !rig.online && (
-        <Text style={styles.rigOffline}>OFFLINE — tap to retry</Text>
-      )}
-      {!rig.enabled && (
-        <Text style={styles.rigDisabled}>DISABLED — tap to enable</Text>
-      )}
-    </TouchableOpacity>
-  );
-}
+  // Grinders state
+  const [grinders,      setGrinders]      = useState([]);
+  const [grinderModal,  setGrinderModal]  = useState(false);
+  const [newGrinder,    setNewGrinder]    = useState({ name:'', host:'', port:'8332' });
 
-// ── Main Screen ─────────────────────────────────────────────
-export default function MinerScreen({ nodeConfig, isOnline }) {
-  const [rigs,         setRigs]         = useState([]);
-  const [refreshing,   setRefreshing]   = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [connecting,   setConnecting]   = useState(false);
+  const uptimeRef   = useRef(null);
+  const grinderPoll = useRef(null);
 
-  // Add rig inputs
-  const [newRigName, setNewRigName] = useState('');
-  const [newRigIp,   setNewRigIp]   = useState('');
-  const [newRigPort, setNewRigPort] = useState('8332');
-
-  const pollRef = useRef(null);
-
-  // ── Load rigs on mount ──────────────────────────────────
+  // ── Mount ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    (async () => {
-      const saved = await loadRigs();
-      setRigs(saved);
-    })();
+    loadAll();
+    subscribeEvents();
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      unsubscribeEvents();
+      clearInterval(uptimeRef.current);
+      clearInterval(grinderPoll.current);
     };
   }, []);
 
-  // ── Start polling when rigs or nodeConfig change ─────────
-  useEffect(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    const enabledRigs = rigs.filter(r => r.enabled);
-    if (enabledRigs.length === 0 || !nodeConfig) return;
-
-    const poll = async () => {
-      let updated = false;
-      const newRigs = await Promise.all(
-        rigs.map(async (rig) => {
-          if (!rig.enabled) return rig;
-          try {
-            const rigConfig = {
-              ip:          rig.ip,
-              port:        rig.port || '8332',
-              rpcuser:     nodeConfig.rpcuser,
-              rpcpassword: nodeConfig.rpcpassword,
-            };
-            const info = await getMiningInfo(rigConfig);
-            updated = true;
-            return {
-              ...rig,
-              online:     true,
-              blocks:     info.blocks          || 0,
-              hashrate:   info.networkhashps   || 0,
-              difficulty: info.difficulty      || 0,
-            };
-          } catch (e) {
-            return { ...rig, online: false };
-          }
-        })
-      );
-      if (updated) {
-        setRigs(newRigs);
-        await saveRigs(newRigs);
-      }
-    };
-
-    poll(); // immediate first poll
-    pollRef.current = setInterval(poll, 5000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [rigs.length, rigs.filter(r => r.enabled).length, nodeConfig]);
-
-  // ── Pull to refresh ─────────────────────────────────────
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    const saved = await loadRigs();
-    setRigs(saved);
-    setRefreshing(false);
-  }, []);
-
-  // ── Toggle rig enabled/disabled ─────────────────────────
-  const toggleRig = useCallback(async (rig) => {
-    const updated = rigs.map(r =>
-      r.id === rig.id ? { ...r, enabled: !r.enabled } : r
-    );
-    setRigs(updated);
-    await saveRigs(updated);
-  }, [rigs]);
-
-  // ── Long press to delete rig ────────────────────────────
-  const deleteRig = useCallback((rig) => {
-    Vibration.vibrate(50);
-    Alert.alert(
-      'Remove Rig',
-      `Delete "${rig.name}" (${rig.ip}:${rig.port || '8332'})?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const updated = rigs.filter(r => r.id !== rig.id);
-            setRigs(updated);
-            await saveRigs(updated);
-          },
-        },
-      ]
-    );
-  }, [rigs]);
-
-  // ── Open add modal — pre-fill IP from nodeConfig ────────
-  const openAddModal = () => {
-    setNewRigIp(nodeConfig?.ip || '');
-    setNewRigPort('8332');
-    setNewRigName('');
-    setShowAddModal(true);
-  };
-
-  // ── Confirm add rig ─────────────────────────────────────
-  const confirmAddRig = async () => {
-    if (!newRigIp.trim()) {
-      Alert.alert('Error', 'IP address is required');
-      return;
-    }
-    if (!nodeConfig?.rpcuser || !nodeConfig?.rpcpassword) {
-      Alert.alert(
-        'No Credentials',
-        'Configure your node via the Setup Menu first.\nTap the mode indicator in the header.'
-      );
-      return;
-    }
-
-    setConnecting(true);
+  const loadAll = async () => {
     try {
-      const rigConfig = {
-        ip:          newRigIp.trim(),
-        port:        newRigPort.trim() || '8332',
-        rpcuser:     nodeConfig.rpcuser,
-        rpcpassword: nodeConfig.rpcpassword,
-      };
+      const addr = await AsyncStorage.getItem(KEY_MINING_ADDR);
+      if (addr) setMiningAddress(addr);
+      const t = await AsyncStorage.getItem(KEY_THREADS);
+      if (t) setThreads(t);
+      const g = await AsyncStorage.getItem(KEY_GRINDERS);
+      if (g) setGrinders(JSON.parse(g));
+    } catch (e) {}
+    loadNodeConfig().then(cfg => { if (cfg) setNodeConfig(cfg); });
+  };
 
-      // Validate connection
-      const info = await getMiningInfo(rigConfig);
-      const newRig = {
-        id:         Date.now().toString(),
-        name:       newRigName.trim() || `Rig ${rigs.length + 1}`,
-        ip:         newRigIp.trim(),
-        port:       newRigPort.trim() || '8332',
-        enabled:    true,
-        online:     true,
-        blocks:     info.blocks        || 0,
-        hashrate:   info.networkhashps || 0,
-        difficulty: info.difficulty    || 0,
-      };
+  // ── Event subscriptions ───────────────────────────────────────────────────
+  // TODO: fill in subscribeEvents and unsubscribeEvents
+  const subsRef = useRef([]);
+  const subscribeEvents = () => {
+    if (!MinerEmitter) return;
+    subsRef.current = [
+      MinerEmitter.addListener('MinerHashrate',  (e) => setHashrate(e.hashrate)),
+      MinerEmitter.addListener('MinerBlockFound', (e) => {
+        setBlocksFound(b => b + 1);
+        Alert.alert('★ BLOCK FOUND', `Height: ${e.height}\n${e.hash.slice(0,32)}...`);
+      }),
+      MinerEmitter.addListener('MinerError', (e) => {
+        console.warn('[MINER ERROR]', e.message);
+      }),
+    ];
+  };
+  const unsubscribeEvents = () => {
+    subsRef.current.forEach(s => s?.remove());
+    subsRef.current = [];
+  };
 
-      const updated = [...rigs, newRig];
-      setRigs(updated);
-      await saveRigs(updated);
-      setShowAddModal(false);
-      Alert.alert('Connected', `${newRig.name} added successfully`);
+  // ── QR scan ───────────────────────────────────────────────────────────────
+  const handleScan = async (address) => {
+    setScannerOpen(false);
+    await AsyncStorage.setItem(KEY_MINING_ADDR, address);
+    setMiningAddress(address);
+  };
+
+  // ── Start mining ──────────────────────────────────────────────────────────
+  const handleStart = async () => {
+    if (!miningAddress) {
+      Alert.alert('NO ADDRESS', 'Scan a mining address from your Qt wallet first.');
+      return;
+    }
+    if (!nodeConfig) {
+      Alert.alert('NO NODE CONFIG', 'Configure node connection in the Setup tab.');
+      return;
+    }
+    const t = Math.max(1, Math.min(8, parseInt(threads, 10) || 4));
+    await AsyncStorage.setItem(KEY_THREADS, String(t));
+    setThreads(String(t));
+
+    const cfg = {
+      host:    nodeConfig.ip,
+      port:    parseInt(nodeConfig.port, 10),
+      user:    nodeConfig.rpcuser,
+      pass:    nodeConfig.rpcpassword,
+      address: miningAddress,
+      threads: t,
+    };
+
+    try {
+      await CapStashMiner.start(cfg);
+      setIsMining(true);
+      setBlocksFound(0);
+      setUptime(0);
+      uptimeRef.current = setInterval(() => setUptime(u => u + 1), 1000);
     } catch (e) {
-      Alert.alert(
-        'Connection Failed',
-        `Could not reach node at ${newRigIp.trim()}:${newRigPort.trim() || '8332'}\n\n${e.message}`
-      );
-    } finally {
-      setConnecting(false);
+      Alert.alert('START FAILED', e.message);
     }
   };
 
-  // ── Render ──────────────────────────────────────────────
+  // ── Stop mining ───────────────────────────────────────────────────────────
+  const handleStop = async () => {
+    try { await CapStashMiner.stop(); } catch (e) {}
+    setIsMining(false);
+    setHashrate(0);
+    clearInterval(uptimeRef.current);
+  };
+
+  // ── Grinders ──────────────────────────────────────────────────────────────
+  // TODO: fill in grinder functions
+  const saveGrinders = async (list) => {
+    setGrinders(list);
+    await AsyncStorage.setItem(KEY_GRINDERS, JSON.stringify(list));
+  };
+
+  const addGrinder = async () => {
+    if (!newGrinder.name || !newGrinder.host) {
+      Alert.alert('MISSING FIELDS', 'Name and host are required.');
+      return;
+    }
+    const g = { ...newGrinder, id: Date.now().toString(), status: 'unknown', hashrate: 0 };
+    await saveGrinders([...grinders, g]);
+    setNewGrinder({ name: '', host: '', port: '8332' });
+    setGrinderModal(false);
+  };
+
+  const removeGrinder = (id) => {
+    Alert.alert('REMOVE GRINDER', 'Remove this rig from the monitor?', [
+      { text: 'CANCEL', style: 'cancel' },
+      { text: 'REMOVE', style: 'destructive',
+        onPress: () => saveGrinders(grinders.filter(g => g.id !== id)) },
+    ]);
+  };
+
+  const [hrValue, hrUnit] = fmtHashrate(hashrate);
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={Colors.green}
-          />
-        }
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>PIP BOY GRINDERS</Text>
-          <Text style={styles.subtitle}>
-            {rigs.filter(r => r.enabled && r.online).length} / {rigs.length} ONLINE
-          </Text>
-        </View>
+    <View style={s.root}>
+      <QRScannerModal
+        visible={scannerOpen}
+        onScan={handleScan}
+        onClose={() => setScannerOpen(false)}
+        title="SCAN MINING ADDRESS"
+        hint="Point at Qt wallet receive address QR"
+      />
+      <GrinderAddModal
+        visible={grinderModal}
+        value={newGrinder}
+        onChange={setNewGrinder}
+        onAdd={addGrinder}
+        onClose={() => setGrinderModal(false)}
+      />
 
-        {/* Credentials source notice */}
-        <View style={styles.credNotice}>
-          <Text style={styles.credNoticeText}>
-            🔑  CREDENTIALS · MANAGED VIA SETUP MENU
-          </Text>
-          <Text style={styles.credNoticeHint}>
-            {nodeConfig?.rpcuser
-              ? `ACTIVE: ${nodeConfig.ip}:${nodeConfig.port || '8332'}`
-              : 'NOT CONFIGURED — TAP MODE INDICATOR IN HEADER'}
-          </Text>
-        </View>
-
-        {/* Rig List */}
-        {rigs.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>NO RIGS CONFIGURED</Text>
-            <Text style={styles.emptySubtext}>Tap + ADD RIG to connect your first rig</Text>
-          </View>
-        ) : (
-          rigs.map((rig) => (
-            <RigCard
-              key={rig.id}
-              rig={rig}
-              onToggle={toggleRig}
-              onLongPress={deleteRig}
-            />
-          ))
-        )}
-      </ScrollView>
-
-      {/* Bottom Button */}
-      <View style={styles.buttonRow}>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={openAddModal}
-        >
-          <Text style={styles.addButtonText}>+ ADD RIG</Text>
-        </TouchableOpacity>
+      {/* ── Header ── */}
+      <View style={s.header}>
+        <Text style={s.headerTitle}>P.B.G.</Text>
+        <Text style={s.headerSub}>PIP BOY GRINDER  //  WHIRLPOOL-512</Text>
       </View>
 
-      {/* ── Add Rig Modal ──────────────────────────────── */}
-      <Modal
-        visible={showAddModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowAddModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>ADD NEW RIG</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Rig Name (optional)"
-              placeholderTextColor="#666"
-              value={newRigName}
-              onChangeText={setNewRigName}
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="IP Address (e.g. 100.x.x.x)"
-              placeholderTextColor="#666"
-              value={newRigIp}
-              onChangeText={setNewRigIp}
-              keyboardType="default"
-              autoCapitalize="none"
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Port (default: 8332)"
-              placeholderTextColor="#666"
-              value={newRigPort}
-              onChangeText={setNewRigPort}
-              keyboardType="numeric"
-              maxLength={5}
-            />
-            <Text style={styles.modalCredHint}>
-              Using credentials from Setup Menu:{' '}
-              <Text style={{ color: Colors.green }}>{nodeConfig?.rpcuser || 'NOT SET'}</Text>
-            </Text>
-            {connecting ? (
-              <View style={styles.connectingRow}>
-                <ActivityIndicator color={Colors.green} />
-                <Text style={styles.connectingText}>CONNECTING...</Text>
-              </View>
-            ) : (
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={styles.modalCancel}
+      <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
+
+        {/* ── Mining Address ── */}
+        <Panel label="MINING ADDRESS">
+          {miningAddress ? (
+            <View>
+              <Text style={s.addrText}>{miningAddress}</Text>
+              <View style={s.row}>
+                <PbgButton label="⊡ RESCAN" onPress={() => setScannerOpen(true)} flex />
+                <PbgButton label="✕ CLEAR" danger
                   onPress={() => {
-                    setShowAddModal(false);
-                    setNewRigName('');
-                    setNewRigIp('');
-                    setNewRigPort('8332');
-                  }}
-                >
-                  <Text style={styles.modalCancelText}>CANCEL</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.modalConfirm}
-                  onPress={confirmAddRig}
-                >
-                  <Text style={styles.modalConfirmText}>CONNECT</Text>
-                </TouchableOpacity>
+                    Alert.alert('CLEAR ADDRESS', 'Remove stored mining address?', [
+                      { text: 'CANCEL', style: 'cancel' },
+                      { text: 'CLEAR', style: 'destructive', onPress: async () => {
+                        await AsyncStorage.removeItem(KEY_MINING_ADDR);
+                        setMiningAddress(null);
+                        if (isMining) handleStop();
+                      }},
+                    ]);
+                  }} flex />
               </View>
-            )}
+            </View>
+          ) : (
+            <View>
+              <Text style={s.noAddrText}>NO ADDRESS CONFIGURED</Text>
+              <PbgButton label="⊡ SCAN QR FROM QT WALLET" onPress={() => setScannerOpen(true)} full />
+            </View>
+          )}
+        </Panel>
+
+        {/* ── Hashrate Dashboard ── */}
+        <Panel label="HASHRATE">
+          <View style={s.hashrateBox}>
+            <Text style={s.hashrateValue}>{isMining ? hrValue : '—'}</Text>
+            <Text style={s.hashrateUnit}>{isMining ? hrUnit : ''}</Text>
           </View>
-        </View>
-      </Modal>
+          <View style={s.statsRow}>
+            <StatBox label="BLOCKS" value={blocksFound} />
+            <StatBox label="UPTIME" value={fmtUptime(uptime)} small />
+            <StatBox label="THREADS" value={isMining ? threads : '—'} />
+          </View>
+        </Panel>
+
+        {/* ── Engine Controls ── */}
+        <Panel label="ENGINE CONTROLS">
+          <View style={s.row}>
+            <Text style={s.threadLabel}>THREADS:</Text>
+            <TextInput
+              style={s.threadInput}
+              value={threads}
+              onChangeText={setThreads}
+              keyboardType="numeric"
+              maxLength={1}
+              editable={!isMining}
+              placeholderTextColor={C.muted}
+            />
+            <Text style={s.threadHint}>(1-8)</Text>
+          </View>
+          {!isMining ? (
+            <PbgButton
+              label="► START MINING"
+              onPress={handleStart}
+              full primary
+              disabled={!miningAddress}
+            />
+          ) : (
+            <PbgButton label="■ STOP MINING" onPress={handleStop} full stop />
+          )}
+        </Panel>
+
+        {/* ── Grinders ── */}
+        <Panel label="GRINDER NETWORK">
+          {grinders.length === 0 ? (
+            <Text style={s.noAddrText}>NO GRINDERS REGISTERED</Text>
+          ) : (
+            grinders.map(g => (
+              <GrinderRow key={g.id} grinder={g} nodeConfig={nodeConfig}
+                onRemove={() => removeGrinder(g.id)} />
+            ))
+          )}
+          <PbgButton label="+ ADD GRINDER" onPress={() => setGrinderModal(true)} full />
+        </Panel>
+
+      </ScrollView>
     </View>
   );
 }
 
-// ── Styles ──────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.blackLight,
-  },
-  scrollContent: {
-    padding: Spacing.md,
-    paddingBottom: 100,
-  },
-  header: {
-    marginBottom: Spacing.lg,
-  },
-  title: {
-    ...Typography.display,
-    color: Colors.green,
-    fontSize: 22,
-  },
-  subtitle: {
-    ...Typography.caption,
-    color: Colors.greenDark,
-    marginTop: 4,
-  },
+// ── Sub-components ────────────────────────────────────────────────────────────
 
-  // Credentials notice
-  credNotice: {
-    borderWidth:     1,
-    borderColor:     Colors.greenDark,
-    backgroundColor: Colors.surface,
-    padding:         Spacing.sm,
-    marginBottom:    Spacing.md,
-  },
-  credNoticeText: {
-    ...Typography.caption,
-    color:         Colors.amber,
-    letterSpacing: 1,
-    fontSize:      11,
-  },
-  credNoticeHint: {
-    ...Typography.caption,
-    color:     Colors.greenDark,
-    marginTop: 3,
-    fontSize:  10,
-  },
+function Panel({ label, children }) {
+  return (
+    <View style={s.panel}>
+      <Text style={s.panelLabel}>▸ {label}</Text>
+      {children}
+    </View>
+  );
+}
 
-  // Empty state
-  emptyState: {
-    alignItems:    'center',
-    paddingVertical: Spacing.xl * 2,
-  },
-  emptyText: {
-    ...Typography.heading,
-    color:    Colors.green,
-    fontSize: 16,
-  },
-  emptySubtext: {
-    ...Typography.caption,
-    color:     Colors.greenDark,
-    marginTop: 8,
-  },
+function StatBox({ label, value, small }) {
+  return (
+    <View style={s.statBox}>
+      <Text style={[s.statValue, small && s.statValueSmall]}>{value}</Text>
+      <Text style={s.statLabel}>{label}</Text>
+    </View>
+  );
+}
 
-  // Rig card
-  rigCard: {
-    backgroundColor: Colors.blackMid,
-    borderLeftWidth: 3,
-    borderRadius:    6,
-    padding:         Spacing.md,
-    marginBottom:    Spacing.sm,
-  },
-  rigHeader: {
-    flexDirection:  'row',
-    justifyContent: 'space-between',
-    alignItems:     'center',
-  },
-  rigName: {
-    ...Typography.heading,
-    color:    Colors.green,
-    fontSize: 15,
-  },
-  statusDot: {
-    width:        10,
-    height:       10,
-    borderRadius: 5,
-  },
-  rigIp: {
-    ...Typography.caption,
-    color:     Colors.greenDark,
-    marginTop: 2,
-    fontSize:  11,
-  },
-  rigStats: {
-    flexDirection:   'row',
-    justifyContent:  'space-between',
-    marginTop:       Spacing.sm,
-    paddingTop:      Spacing.sm,
-    borderTopWidth:  1,
-    borderTopColor:  Colors.greenDark,
-  },
-  rigStatItem: {
-    alignItems: 'center',
-    flex:       1,
-  },
-  rigStatLabel: {
-    ...Typography.caption,
-    color:         Colors.greenDark,
-    fontSize:      9,
-    letterSpacing: 1,
-  },
-  rigStatValue: {
-    ...Typography.mono,
-    color:     Colors.green,
-    fontSize:  13,
-    marginTop: 2,
-  },
-  rigOffline: {
-    ...Typography.caption,
-    color:     Colors.amber,
-    marginTop: Spacing.sm,
-    fontSize:  11,
-  },
-  rigDisabled: {
-    ...Typography.caption,
-    color:     Colors.greenDim,
-    marginTop: Spacing.sm,
-    fontSize:  11,
-  },
+function PbgButton({ label, onPress, full, primary, stop, danger, disabled, flex }) {
+  return (
+    <TouchableOpacity
+      style={[
+        s.btn,
+        full  && s.btnFull,
+        flex  && s.btnFlex,
+        primary && s.btnPrimary,
+        stop    && s.btnStop,
+        danger  && s.btnDanger,
+        disabled && s.btnDisabled,
+      ]}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      <Text style={[s.btnText, danger && s.btnTextDanger]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
-  // Bottom buttons
-  buttonRow: {
-    position:        'absolute',
-    bottom:          0,
-    left:            0,
-    right:           0,
-    padding:         Spacing.md,
-    backgroundColor: Colors.blackLight,
-    borderTopWidth:  1,
-    borderTopColor:  Colors.greenDark,
-  },
-  addButton: {
-    backgroundColor: Colors.green,
-    paddingVertical: 14,
-    borderRadius:    6,
-    alignItems:      'center',
-  },
-  addButtonText: {
-    ...Typography.heading,
-    color:    Colors.black,
-    fontSize: 13,
-  },
+function GrinderRow({ grinder, nodeConfig, onRemove }) {
+  const [hr,     setHr]     = useState(0);
+  const [status, setStatus] = useState('CONNECTING...');
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    pollGrinder();
+    pollRef.current = setInterval(pollGrinder, 10000);
+    return () => clearInterval(pollRef.current);
+  }, []);
+
+  const pollGrinder = async () => {
+    // Matches Qt wallet getnetworkhashps default (120 block window)
+    try {
+      const user = nodeConfig?.rpcuser || '';
+      const pass = nodeConfig?.rpcpassword || '';
+      const auth = btoa(`${user}:${pass}`);
+      const res  = await fetch(
+        `http://${grinder.host}:${grinder.port}/`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            'Authorization': `Basic ${auth}`,
+          },
+          body: JSON.stringify({
+            jsonrpc: '1.0', id: 'monitor',
+            method: 'getnetworkhashps',
+            params: [],   // default = last 120 blocks, matches Qt wallet
+          }),
+        }
+      );
+      const json = await res.json();
+      if (json?.result !== undefined && json.result !== null) {
+        setHr(json.result);   // returns number directly e.g. 1028841743.325364
+        setStatus('ONLINE');
+      }
+    } catch (e) {
+      setStatus('OFFLINE');
+      setHr(0);
+    }
+  };
+
+  const [hrVal, hrUnit] = fmtHashrate(hr);
+
+  return (
+    <View style={s.grinderRow}>
+      <View style={s.grinderInfo}>
+        <Text style={s.grinderName}>{grinder.name}</Text>
+        <Text style={s.grinderHost}>{grinder.host}:{grinder.port}</Text>
+      </View>
+      <View style={s.grinderStats}>
+        <Text style={[s.grinderStatus,
+          status === 'ONLINE' ? s.statusOnline : s.statusOffline]}>
+          {status}
+        </Text>
+        {status === 'ONLINE' && (
+          <Text style={s.grinderHr}>{hrVal} {hrUnit}</Text>
+        )}
+      </View>
+      <TouchableOpacity onPress={onRemove} style={s.grinderRemove}>
+        <Text style={s.grinderRemoveText}>✕</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function GrinderAddModal({ visible, value, onChange, onAdd, onClose }) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={s.modalOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={s.modalBox}>
+          <Text style={s.modalTitle}>ADD GRINDER</Text>
+
+          <Text style={s.inputLabel}>RIG NAME</Text>
+          <TextInput
+            style={s.input}
+            value={value.name}
+            onChangeText={t => onChange({ ...value, name: t })}
+            placeholder="e.g. GARAGE-RIG-1"
+            placeholderTextColor={C.muted}
+          />
+
+          <Text style={s.inputLabel}>HOST / IP</Text>
+          <TextInput
+            style={s.input}
+            value={value.host}
+            onChangeText={t => onChange({ ...value, host: t })}
+            placeholder="100.x.x.x or 192.168.x.x"
+            placeholderTextColor={C.muted}
+            autoCapitalize="none"
+            keyboardType="default"
+          />
+
+          <Text style={s.inputLabel}>RPC PORT</Text>
+          <TextInput
+            style={s.input}
+            value={value.port}
+            onChangeText={t => onChange({ ...value, port: t })}
+            placeholder="8332"
+            placeholderTextColor={C.muted}
+            keyboardType="numeric"
+          />
+
+          <View style={[s.row, { marginTop: 16 }]}>
+            <PbgButton label="CANCEL" onPress={onClose} flex />
+            <PbgButton label="ADD GRINDER" onPress={onAdd} flex primary />
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  root:    { flex: 1, backgroundColor: C.bg },
+  scroll:  { flex: 1 },
+  scrollContent: { padding: 12, paddingBottom: 32 },
+
+  // Header
+  header:     { borderBottomWidth: 1, borderBottomColor: C.border,
+                backgroundColor: C.surface, paddingHorizontal: 16, paddingVertical: 10 },
+  headerTitle:{ ...F.heading, color: C.green, fontSize: 28, letterSpacing: 4 },
+  headerSub:  { ...F.mono, color: C.muted, fontSize: 10, letterSpacing: 2, marginTop: 2 },
+
+  // Panel
+  panel:      { borderWidth: 1, borderColor: C.border, backgroundColor: C.surface,
+                padding: 12, marginBottom: 10 },
+  panelLabel: { ...F.mono, color: C.muted, fontSize: 11, letterSpacing: 2, marginBottom: 10 },
+
+  // Address
+  addrText:   { ...F.mono, color: C.green, fontSize: 11, marginBottom: 10 },
+  noAddrText: { ...F.mono, color: C.amber, fontSize: 12, textAlign: 'center',
+                letterSpacing: 1, marginBottom: 12 },
+
+  // Hashrate
+  hashrateBox:  { alignItems: 'center', paddingVertical: 16 },
+  hashrateValue:{ ...F.heading, color: C.green, fontSize: 72, lineHeight: 76 },
+  hashrateUnit: { ...F.mono, color: C.greenDim, fontSize: 18, letterSpacing: 3, marginTop: 4 },
+
+  // Stats row
+  statsRow: { flexDirection: 'row', justifyContent: 'space-around',
+              borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12, marginTop: 8 },
+  statBox:  { alignItems: 'center', flex: 1 },
+  statValue:{ ...F.heading, color: C.white, fontSize: 22 },
+  statValueSmall: { fontSize: 16 },
+  statLabel:{ ...F.mono, color: C.muted, fontSize: 9, letterSpacing: 1, marginTop: 2 },
+
+  // Thread controls
+  row:         { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  threadLabel: { ...F.mono, color: C.muted, fontSize: 12, letterSpacing: 1 },
+  threadInput: { ...F.mono, color: C.green, fontSize: 18, borderWidth: 1,
+                 borderColor: C.border, backgroundColor: C.bg,
+                 paddingHorizontal: 12, paddingVertical: 6,
+                 width: 56, textAlign: 'center' },
+  threadHint:  { ...F.mono, color: C.muted, fontSize: 10 },
+
+  // Buttons
+  btn:         { borderWidth: 1, borderColor: C.muted, paddingVertical: 10,
+                 paddingHorizontal: 14, alignItems: 'center', marginBottom: 6 },
+  btnFull:     { width: '100%' },
+  btnFlex:     { flex: 1 },
+  btnPrimary:  { borderColor: C.green },
+  btnStop:     { borderColor: C.amber },
+  btnDanger:   { borderColor: C.danger },
+  btnDisabled: { opacity: 0.35 },
+  btnText:     { ...F.mono, color: C.green, fontSize: 13, letterSpacing: 2 },
+  btnTextDanger:{ ...F.mono, color: C.danger, fontSize: 13, letterSpacing: 2 },
+
+  // Grinders
+  grinderRow:   { flexDirection: 'row', alignItems: 'center', borderWidth: 1,
+                  borderColor: C.border, padding: 10, marginBottom: 8 },
+  grinderInfo:  { flex: 1 },
+  grinderName:  { ...F.heading, color: C.green, fontSize: 18, letterSpacing: 1 },
+  grinderHost:  { ...F.mono, color: C.muted, fontSize: 10 },
+  grinderStats: { alignItems: 'flex-end', marginRight: 10 },
+  grinderStatus:{ ...F.mono, fontSize: 10, letterSpacing: 1 },
+  statusOnline: { color: C.green },
+  statusOffline:{ color: C.danger },
+  grinderHr:    { ...F.mono, color: C.white, fontSize: 12, marginTop: 2 },
+  grinderRemove:{ padding: 6 },
+  grinderRemoveText: { ...F.mono, color: C.danger, fontSize: 14 },
 
   // Modal
-  modalOverlay: {
-    flex:            1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent:  'center',
-    padding:         Spacing.lg,
-  },
-  modalContent: {
-    backgroundColor: Colors.blackMid,
-    borderRadius:    8,
-    padding:         Spacing.lg,
-    borderWidth:     1,
-    borderColor:     Colors.greenDark,
-  },
-  modalTitle: {
-    ...Typography.display,
-    color:        Colors.green,
-    fontSize:     18,
-    marginBottom: Spacing.sm,
-  },
-  modalInput: {
-    backgroundColor:   Colors.blackLight,
-    color:             Colors.green,
-    fontFamily:        'SpaceMono-Regular',
-    fontSize:          14,
-    paddingHorizontal: Spacing.md,
-    paddingVertical:   12,
-    borderRadius:      6,
-    borderWidth:       1,
-    borderColor:       Colors.greenDark,
-    marginBottom:      Spacing.sm,
-  },
-  modalCredHint: {
-    ...Typography.micro,
-    color:         Colors.greenDim,
-    letterSpacing: 0.5,
-    marginBottom:  Spacing.sm,
-    fontSize:      10,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap:           Spacing.sm,
-    marginTop:     Spacing.sm,
-  },
-  modalCancel: {
-    flex:          1,
-    paddingVertical: 12,
-    borderRadius:  6,
-    alignItems:    'center',
-    borderWidth:   1,
-    borderColor:   Colors.greenDark,
-  },
-  modalCancelText: {
-    ...Typography.heading,
-    color:    Colors.greenDark,
-    fontSize: 13,
-  },
-  modalConfirm: {
-    flex:            1,
-    backgroundColor: Colors.green,
-    paddingVertical: 12,
-    borderRadius:    6,
-    alignItems:      'center',
-  },
-  modalConfirmText: {
-    ...Typography.heading,
-    color:    Colors.black,
-    fontSize: 13,
-  },
-  connectingRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    gap:            10,
-  },
-  connectingText: {
-    ...Typography.heading,
-    color:    Colors.green,
-    fontSize: 13,
-  },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)',
+                  justifyContent: 'center', padding: 20 },
+  modalBox:     { backgroundColor: C.surface, borderWidth: 1,
+                  borderColor: C.border, padding: 20 },
+  modalTitle:   { ...F.heading, color: C.green, fontSize: 22,
+                  letterSpacing: 3, marginBottom: 16 },
+  inputLabel:   { ...F.mono, color: C.muted, fontSize: 10,
+                  letterSpacing: 1, marginBottom: 4 },
+  input:        { ...F.mono, color: C.white, fontSize: 13, borderWidth: 1,
+                  borderColor: C.border, backgroundColor: C.bg,
+                  paddingHorizontal: 10, paddingVertical: 8, marginBottom: 12 },
 });

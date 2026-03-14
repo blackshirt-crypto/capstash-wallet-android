@@ -549,7 +549,28 @@ const C7 = new Uint32Array([
   0x28a0285d,0x88507528, 0x5c6d5cda,0x31b8865c, 0xf8c7f893,0x3fed6bf8, 0x86228644,0xa411c286,
 ]);
 
-// Round constants (10 rounds × 2 Uint32 = 20 entries)
+// ── Pre-allocated working buffers (module-level, zero allocation in hot path) ──
+const _padded  = new Uint8Array(128);   // 80-byte header always fits in 1 block (128 bytes padded)
+const _paddedView = new DataView(_padded.buffer);
+const _H_hi = new Int32Array(8);
+const _H_lo = new Int32Array(8);
+const _K_hi = new Int32Array(8);
+const _K_lo = new Int32Array(8);
+const _L_hi = new Int32Array(8);
+const _L_lo = new Int32Array(8);
+const _S_hi = new Int32Array(8);
+const _S_lo = new Int32Array(8);
+const _T_hi = new Int32Array(8);
+const _T_lo = new Int32Array(8);
+const _wh64  = new Uint8Array(64);      // whirlpool512 output
+const _pow32 = new Uint8Array(32);      // capstashPoWHash output (reused!)
+const _wh64View = new DataView(_wh64.buffer);
+const _header80 = new Uint8Array(80);   // buildHeader output (reused!)
+const _headerView = new DataView(_header80.buffer);
+
+const TABLES = [C0, C1, C2, C3, C4, C5, C6, C7];
+
+// Round constants (10 rounds)
 const RC = new Uint32Array([
   0x1823c6e8, 0x87b8014f,
   0x36a6d2f5, 0x796f9152,
@@ -563,180 +584,111 @@ const RC = new Uint32Array([
   0xca2dbf07, 0xad5a8333,
 ]);
 
-// ── Whirlpool-512 ──────────────────────────────────────────────────────────
-// State: 8 words × 64-bit, each stored as [hi, lo] (two Uint32)
-// Tables C0..C7: each Ck[x] = rotate_right_64(C0[x], 8*k)
-// Indexed as Ck_hi = Ck[x*2], Ck_lo = Ck[x*2+1]
+// Whirlpool-512 over exactly 80 bytes — zero allocation, reuses _padded and _wh64
+function whirlpool512_80(data80) {
+  // Build padded message in pre-allocated buffer
+  // 80 bytes + 0x80 + zeros + 64-bit bitlength at end = 128 bytes (one 64-byte block × 2)
+  _padded.fill(0);
+  _padded.set(data80);
+  _padded[80] = 0x80;
+  // bit length = 80 * 8 = 640 = 0x280, written as 64-bit big-endian at bytes 120..127
+  _padded[126] = 0x02;
+  _padded[127] = 0x80;
 
-function lookupHi(T, x) { return T[x * 2];     }
-function lookupLo(T, x) { return T[x * 2 + 1]; }
+  // Zero hash state
+  _H_hi[0]=_H_hi[1]=_H_hi[2]=_H_hi[3]=_H_hi[4]=_H_hi[5]=_H_hi[6]=_H_hi[7]=0;
+  _H_lo[0]=_H_lo[1]=_H_lo[2]=_H_lo[3]=_H_lo[4]=_H_lo[5]=_H_lo[6]=_H_lo[7]=0;
 
-const TABLES = [C0, C1, C2, C3, C4, C5, C6, C7];
-
-function roundTransform(src, dst, K_hi, K_lo) {
-  // src, dst: arrays of 16 Uint32 [h0,l0, h1,l1, ...]
-  // K_hi, K_lo: arrays of 8 key words (or null for key schedule XOR)
-  for (let i = 0; i < 8; i++) {
-    let rh = 0, rl = 0;
-    for (let j = 0; j < 8; j++) {
-      const si = ((i - j + 8) & 7) * 2;
-      // Extract byte j from word si: byte 0=MSB of hi, byte 4=MSB of lo
-      let byte_val;
-      if (j < 4) {
-        byte_val = (src[si] >>> (24 - j * 8)) & 0xFF;
-      } else {
-        byte_val = (src[si + 1] >>> (24 - (j - 4) * 8)) & 0xFF;
-      }
-      const T = TABLES[j];
-      rh ^= T[byte_val * 2];
-      rl ^= T[byte_val * 2 + 1];
-    }
-    if (K_hi !== null) {
-      rh ^= K_hi[i];
-      rl ^= K_lo[i];
-    }
-    dst[i * 2]     = rh;
-    dst[i * 2 + 1] = rl;
-  }
-}
-
-function whirlpool512(data) {
-  // data: Uint8Array
-  // Padding: append 0x80, zeros, then 256-bit big-endian bit length
-  const msgLen = data.length;
-  const bitLen = msgLen * 8; // safe for up to 2^53 bytes (JS limit anyway)
-
-  // Total padded length: next multiple of 64 after (msgLen + 1 + 32)
-  const rawLen = msgLen + 1 + 32;
-  const padLen = Math.ceil(rawLen / 64) * 64;
-
-  const padded = new Uint8Array(padLen);
-  padded.set(data);
-  padded[msgLen] = 0x80;
-  // Write 64-bit bit length at the very end (bytes padLen-8 .. padLen-1)
-  // (256-bit field, we only need last 8 bytes for any practical message)
-  const view = new DataView(padded.buffer);
-  view.setUint32(padLen - 8, Math.floor(bitLen / 0x100000000) >>> 0, false);
-  view.setUint32(padLen - 4, bitLen >>> 0, false);
-
-  // Hash state: 8 × 64-bit as flat Uint32 array [h0,l0, h1,l1, ...]
-  const H_hi = new Int32Array(8);
-  const H_lo = new Int32Array(8);
-
-  const K_hi = new Int32Array(8);
-  const K_lo = new Int32Array(8);
-  const L_hi = new Int32Array(8);
-  const L_lo = new Int32Array(8);
-  const S_hi = new Int32Array(8); // state
-  const S_lo = new Int32Array(8);
-  const T_hi = new Int32Array(8); // temp
-  const T_lo = new Int32Array(8);
-
-  for (let offset = 0; offset < padLen; offset += 64) {
-    // Load block as 8 × 64-bit words (big-endian)
-    const bv = new DataView(padded.buffer, offset, 64);
+  // Two 64-byte blocks
+  for (let offset = 0; offset < 128; offset += 64) {
+    // Load block, init K = H, S = block XOR H
     for (let i = 0; i < 8; i++) {
-      const bhi = bv.getUint32(i * 8,     false);
-      const blo = bv.getUint32(i * 8 + 4, false);
-      K_hi[i] = H_hi[i];
-      K_lo[i] = H_lo[i];
-      S_hi[i] = (bhi ^ H_hi[i]) | 0;
-      S_lo[i] = (blo ^ H_lo[i]) | 0;
+      const bhi = _paddedView.getUint32(offset + i * 8,     false);
+      const blo = _paddedView.getUint32(offset + i * 8 + 4, false);
+      _K_hi[i] = _H_hi[i];
+      _K_lo[i] = _H_lo[i];
+      _S_hi[i] = (bhi ^ _H_hi[i]) | 0;
+      _S_lo[i] = (blo ^ _H_lo[i]) | 0;
     }
 
     // 10 rounds
     for (let r = 0; r < 10; r++) {
-      // ── Key schedule ──
       const rc_hi = RC[r * 2];
       const rc_lo = RC[r * 2 + 1];
-      for (let i = 0; i < 8; i++) {
-        let rh = 0, rl = 0;
-        for (let j = 0; j < 8; j++) {
-          const si = (i - j + 8) & 7;
-          let byte_val;
-          if (j < 4) {
-            byte_val = (K_hi[si] >>> (24 - j * 8)) & 0xFF;
-          } else {
-            byte_val = (K_lo[si] >>> (24 - (j - 4) * 8)) & 0xFF;
-          }
-          const T = TABLES[j];
-          rh ^= T[byte_val * 2];
-          rl ^= T[byte_val * 2 + 1];
-        }
-        L_hi[i] = (i === 0 ? rh ^ rc_hi : rh) | 0;
-        L_lo[i] = (i === 0 ? rl ^ rc_lo : rl) | 0;
-      }
-      for (let i = 0; i < 8; i++) { K_hi[i] = L_hi[i]; K_lo[i] = L_lo[i]; }
 
-      // ── State transform ──
+      // Key schedule
       for (let i = 0; i < 8; i++) {
         let rh = 0, rl = 0;
         for (let j = 0; j < 8; j++) {
           const si = (i - j + 8) & 7;
-          let byte_val;
-          if (j < 4) {
-            byte_val = (S_hi[si] >>> (24 - j * 8)) & 0xFF;
-          } else {
-            byte_val = (S_lo[si] >>> (24 - (j - 4) * 8)) & 0xFF;
-          }
+          const bv = j < 4
+            ? (_K_hi[si] >>> (24 - j * 8)) & 0xFF
+            : (_K_lo[si] >>> (56 - j * 8)) & 0xFF;
           const T = TABLES[j];
-          rh ^= T[byte_val * 2];
-          rl ^= T[byte_val * 2 + 1];
+          rh ^= T[bv * 2];
+          rl ^= T[bv * 2 + 1];
         }
-        T_hi[i] = (rh ^ K_hi[i]) | 0;
-        T_lo[i] = (rl ^ K_lo[i]) | 0;
+        _L_hi[i] = (i === 0 ? rh ^ rc_hi : rh) | 0;
+        _L_lo[i] = (i === 0 ? rl ^ rc_lo : rl) | 0;
       }
-      for (let i = 0; i < 8; i++) { S_hi[i] = T_hi[i]; S_lo[i] = T_lo[i]; }
+      _K_hi[0]=_L_hi[0]; _K_hi[1]=_L_hi[1]; _K_hi[2]=_L_hi[2]; _K_hi[3]=_L_hi[3];
+      _K_hi[4]=_L_hi[4]; _K_hi[5]=_L_hi[5]; _K_hi[6]=_L_hi[6]; _K_hi[7]=_L_hi[7];
+      _K_lo[0]=_L_lo[0]; _K_lo[1]=_L_lo[1]; _K_lo[2]=_L_lo[2]; _K_lo[3]=_L_lo[3];
+      _K_lo[4]=_L_lo[4]; _K_lo[5]=_L_lo[5]; _K_lo[6]=_L_lo[6]; _K_lo[7]=_L_lo[7];
+
+      // State transform
+      for (let i = 0; i < 8; i++) {
+        let rh = 0, rl = 0;
+        for (let j = 0; j < 8; j++) {
+          const si = (i - j + 8) & 7;
+          const bv = j < 4
+            ? (_S_hi[si] >>> (24 - j * 8)) & 0xFF
+            : (_S_lo[si] >>> (56 - j * 8)) & 0xFF;
+          const T = TABLES[j];
+          rh ^= T[bv * 2];
+          rl ^= T[bv * 2 + 1];
+        }
+        _T_hi[i] = (rh ^ _K_hi[i]) | 0;
+        _T_lo[i] = (rl ^ _K_lo[i]) | 0;
+      }
+      _S_hi[0]=_T_hi[0]; _S_hi[1]=_T_hi[1]; _S_hi[2]=_T_hi[2]; _S_hi[3]=_T_hi[3];
+      _S_hi[4]=_T_hi[4]; _S_hi[5]=_T_hi[5]; _S_hi[6]=_T_hi[6]; _S_hi[7]=_T_hi[7];
+      _S_lo[0]=_T_lo[0]; _S_lo[1]=_T_lo[1]; _S_lo[2]=_T_lo[2]; _S_lo[3]=_T_lo[3];
+      _S_lo[4]=_T_lo[4]; _S_lo[5]=_T_lo[5]; _S_lo[6]=_T_lo[6]; _S_lo[7]=_T_lo[7];
     }
 
-    // Miyaguchi-Preneel: H ^= state ^ block
-    const bv2 = new DataView(padded.buffer, offset, 64);
+    // Miyaguchi-Preneel: H ^= S ^ block
     for (let i = 0; i < 8; i++) {
-      H_hi[i] ^= S_hi[i] ^ bv2.getUint32(i * 8,     false);
-      H_lo[i] ^= S_lo[i] ^ bv2.getUint32(i * 8 + 4, false);
+      _H_hi[i] ^= _S_hi[i] ^ _paddedView.getUint32(offset + i * 8,     false);
+      _H_lo[i] ^= _S_lo[i] ^ _paddedView.getUint32(offset + i * 8 + 4, false);
     }
   }
 
-  // Serialize to 64 bytes (big-endian)
-  const out = new Uint8Array(64);
-  const outView = new DataView(out.buffer);
+  // Serialize H into _wh64
   for (let i = 0; i < 8; i++) {
-    outView.setUint32(i * 8,     H_hi[i] >>> 0, false);
-    outView.setUint32(i * 8 + 4, H_lo[i] >>> 0, false);
+    _wh64View.setUint32(i * 8,     _H_hi[i] >>> 0, false);
+    _wh64View.setUint32(i * 8 + 4, _H_lo[i] >>> 0, false);
   }
-  return out;
 }
 
-// ── CapStash PoW Hash ──────────────────────────────────────────────────────
-// Matches CBlockHeader::GetPoWHash():
-//   1. Whirlpool-512 over 80-byte header
-//   2. XOR bytes[0..31] with bytes[32..63] → 32-byte result
-// The result byte-reversed matches the node's "powhash" display field.
-
+// CapStash PoW hash — returns the SAME _pow32 buffer every call (caller must use immediately)
 export function capstashPoWHash(header80) {
-  const wh = whirlpool512(header80);
-  const out = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) out[i] = wh[i] ^ wh[i + 32];
-  return out;
+  whirlpool512_80(header80);
+  for (let i = 0; i < 32; i++) _pow32[i] = _wh64[i] ^ _wh64[i + 32];
+  return _pow32;
 }
 
-// ── Header builder ─────────────────────────────────────────────────────────
-// All hash fields (prevHash, merkleRoot) must be hex strings in display order
-// (they are reversed to internal LE byte order here).
-
+// buildHeader — writes into _header80 and returns it (reused buffer)
 export function buildHeader(version, prevHash, merkleRoot, time, bits, nonce) {
-  const buf  = new Uint8Array(80);
-  const view = new DataView(buf.buffer);
-  view.setUint32(0, version, true);
-  // Hash fields: hex string → bytes → reverse (display is big-endian, stored LE)
+  _headerView.setUint32(0, version, true);
   const prev   = hexToBytes(prevHash);
   const merkle = hexToBytes(merkleRoot);
-  for (let i = 0; i < 32; i++) buf[4  + i] = prev[31   - i];
-  for (let i = 0; i < 32; i++) buf[36 + i] = merkle[31 - i];
-  view.setUint32(68, time,  true);
-  view.setUint32(72, bits,  true);
-  view.setUint32(76, nonce, true);
-  return buf;
+  for (let i = 0; i < 32; i++) _header80[4  + i] = prev[31   - i];
+  for (let i = 0; i < 32; i++) _header80[36 + i] = merkle[31 - i];
+  _headerView.setUint32(68, time,  true);
+  _headerView.setUint32(72, bits,  true);
+  _headerView.setUint32(76, nonce, true);
+  return _header80;
 }
 
 export function setNonce(headerBuf, nonce) {
@@ -747,7 +699,6 @@ export function setTime(headerBuf, time) {
   new DataView(headerBuf.buffer, headerBuf.byteOffset).setUint32(68, time, true);
 }
 
-// ── Target from nBits ──────────────────────────────────────────────────────
 export function bitsToTarget(bits) {
   const exp   = (bits >>> 24) & 0xFF;
   const mant  = bits & 0x7FFFFF;
@@ -760,16 +711,13 @@ export function bitsToTarget(bits) {
 }
 
 export function hashMeetsTarget(hash32, target32) {
-  // hash32: internal order — byte 31 is MSB (= first byte of display hash)
-  // target32: big-endian — byte 0 is MSB
-  // hash meets target if hash < target numerically
   for (let i = 0; i < 32; i++) {
-    const hb = hash32[31 - i]; // MSB first
+    const hb = hash32[31 - i];
     const tb = target32[i];
     if (hb < tb) return true;
     if (hb > tb) return false;
   }
-  return true; // equal also meets target
+  return true;
 }
 
 export function hexToBytes(hex) {

@@ -1,5 +1,5 @@
 // services/getBlockTemplate.js
-// Block template fetch + block submit for CapStash mining engine
+import { Buffer } from 'buffer';
 
 /**
  * Make an RPC call using nodeConfig { ip, port, rpcuser, rpcpassword }
@@ -15,7 +15,6 @@ async function rigRpc(nodeConfig, method, params = []) {
     params,
   });
 
-  // Buffer.from instead of btoa — required for React Native
   const auth = Buffer.from(`${rpcuser}:${rpcpassword}`).toString('base64');
 
   const response = await fetch(url, {
@@ -43,6 +42,7 @@ export async function getBlockTemplate(nodeConfig) {
       'getblocktemplate',
       [{ rules: ['segwit'] }],
     );
+    console.log('[getBlockTemplate] RAW:', JSON.stringify(template, null, 2));
     return template;
   } catch (error) {
     console.error('[getBlockTemplate] Failed:', error.message);
@@ -51,18 +51,13 @@ export async function getBlockTemplate(nodeConfig) {
 }
 
 /**
- * Submit a solved block to the network
+ * Submit a solved block to the node
  * @param {object} nodeConfig - { ip, port, rpcuser, rpcpassword }
- * @param {string} blockHex - Fully serialized block as hex string
+ * @param {string} blockHex - fully serialized block as hex string
  */
 export async function submitBlock(nodeConfig, blockHex) {
   try {
     const result = await rigRpc(nodeConfig, 'submitblock', [blockHex]);
-    if (result === null) {
-      console.log('[submitBlock] ✅ BLOCK ACCEPTED');
-    } else {
-      console.warn('[submitBlock] ❌ Block rejected:', result);
-    }
     return result;
   } catch (error) {
     console.error('[submitBlock] Failed:', error.message);

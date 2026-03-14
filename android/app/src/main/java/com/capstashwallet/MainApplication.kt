@@ -1,6 +1,7 @@
 package com.capstashwallet
 
 import android.app.Application
+import com.capstashwallet.MinerPackage
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -17,10 +18,10 @@ class MainApplication : Application(), ReactApplication {
   override val reactNativeHost: ReactNativeHost =
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> {
-          // Packages that cannot be autolinked yet can be added manually here, for example:
-          // packages.add(new MyReactNativePackage());
-          return PackageList(this).packages
-        }
+  val packages = PackageList(this).packages
+  packages.add(MinerPackage())
+  return packages
+}
 
         override fun getJSMainModuleName(): String = "index"
 
