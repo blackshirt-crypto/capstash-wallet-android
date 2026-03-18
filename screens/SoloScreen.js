@@ -7,7 +7,7 @@ import {
   View, Text, ScrollView, TextInput,
   RefreshControl, StyleSheet,
 } from 'react-native';
-import { getMiningInfo, getNetworkHashPs } from '../services/rpc';
+import { getMiningInfo } from '../services/rpc';
 import Colors from '../theme/colors';
 import Typography from '../theme/typography';
 
@@ -70,11 +70,8 @@ export default function SoloScreen({ nodeConfig }) {
 
   const load = useCallback(async () => {
     try {
-      const [mining, hashps] = await Promise.all([
-        getMiningInfo(nodeConfig),
-        getNetworkHashPs(nodeConfig),
-      ]);
-      setNetworkHash(hashps || 175554028);
+      const mining = await getMiningInfo(nodeConfig);
+      setNetworkHash(mining?.networkhashps || 175554028);
       setDifficulty(mining?.difficulty || 3.128);
       if (mining?.localhashrate > 0) {
         setLocalHash(mining.localhashrate);

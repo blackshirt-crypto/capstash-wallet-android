@@ -7,13 +7,12 @@ import {
 } from 'react-native';
 import Svg, { Path, Line, Defs, LinearGradient, Stop } from 'react-native-svg';
 import {
-  getBlockchainInfo, getNetworkInfo, getMiningInfo,
-  getNetworkHashPs, getMempoolInfo,
+  getBlockchainInfo, getNetworkInfo, getMiningInfo, getMempoolInfo,
 } from '../services/rpc';
 import Colors from '../theme/colors';
 import Typography from '../theme/typography';
 
-const GRAPH_HISTORY = 24; // data points
+const GRAPH_HISTORY = 24;
 
 export default function NetworkScreen({ nodeConfig }) {
   const [chainInfo,   setChainInfo]   = useState(null);
@@ -26,19 +25,18 @@ export default function NetworkScreen({ nodeConfig }) {
 
   const load = useCallback(async () => {
     try {
-      const [chain, net, mining, mempool, hashps] = await Promise.all([
+      const [chain, net, mining, mempool] = await Promise.all([
         getBlockchainInfo(nodeConfig),
         getNetworkInfo(nodeConfig),
         getMiningInfo(nodeConfig),
         getMempoolInfo(nodeConfig),
-        getNetworkHashPs(nodeConfig),
       ]);
       setChainInfo(chain);
       setNetInfo(net);
       setMiningInfo(mining);
       setMempoolInfo(mempool);
       setHashHistory(prev => {
-        const updated = [...prev, hashps / 1e6]; // MH/s
+        const updated = [...prev, (mining?.networkhashps || 0) / 1e6];
         return updated.slice(-GRAPH_HISTORY);
       });
     } catch (e) {
@@ -48,7 +46,7 @@ export default function NetworkScreen({ nodeConfig }) {
 
   useEffect(() => {
     load();
-    intervalRef.current = setInterval(load, 30000); // refresh every 30s
+    intervalRef.current = setInterval(load, 30000);
     return () => clearInterval(intervalRef.current);
   }, [load]);
 
@@ -77,7 +75,6 @@ export default function NetworkScreen({ nodeConfig }) {
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.green} />
       }
     >
-      {/* Hashrate graph */}
       <View style={styles.graphCard}>
         <Text style={styles.graphTitle}>▸ UPLINK — NETWORK HASHRATE LIVE</Text>
         <HashGraph data={hashHistory} />
@@ -86,16 +83,15 @@ export default function NetworkScreen({ nodeConfig }) {
         </Text>
       </View>
 
-      {/* Network stats */}
       <Text style={styles.sectionHeader}>▸ CHAIN STATUS</Text>
-
       <NetRow label="NETWORK HASHRATE"  value={formatHash(miningInfo?.networkhashps / 1e6)} />
       <NetRow label="DIFFICULTY"        value={miningInfo?.difficulty?.toFixed(3) || '—'} />
       <NetRow label="BLOCK HEIGHT"      value={chainInfo ? `#${chainInfo.blocks}` : '—'} />
       <NetRow label="BEST BLOCK HASH"   value={chainInfo?.bestblockhash?.slice(0,16) + '...' || '—'} small />
       <NetRow label="CHAIN SIZE"        value={chainInfo ? formatSize(chainInfo.size_on_disk) : '—'} />
-      <NetRow label="SYNC PROGRESS" value={chainInfo ? (chainInfo.verificationprogress > 0.98 ? '100%' : `${(chainInfo.verificationprogress * 100).toFixed(1)}%`) : '—'} />
-      <Text style={[styles.sectionHeader, { marginTop: 12 }]}>▸ NETWORK</Text>  
+      <NetRow label="SYNC PROGRESS"     value={chainInfo ? (chainInfo.verificationprogress > 0.98 ? '100%' : `${(chainInfo.verificationprogress * 100).toFixed(1)}%`) : '—'} />
+
+      <Text style={[styles.sectionHeader, { marginTop: 12 }]}>▸ NETWORK</Text>
       <NetRow label="CONNECTIONS"       value={netInfo ? `${netInfo.connections} PEERS` : '—'} />
       <NetRow label="INBOUND"           value={netInfo ? `${netInfo.connections_in}` : '—'} />
       <NetRow label="OUTBOUND"          value={netInfo ? `${netInfo.connections_out}` : '—'} />
@@ -111,16 +107,17 @@ export default function NetworkScreen({ nodeConfig }) {
   );
 }
 
-// SVG hashrate graph
 function HashGraph({ data }) {
   const width  = Dimensions.get('window').width - 56;
   const height = 80;
   const pad    = 4;
 
   if (!data || data.length < 2) {
-    return <View style={{ height, justifyContent: 'center', alignItems: 'center' }}>
-      <Text style={{ color: Colors.greenDim, fontSize: 9 }}>COLLECTING DATA...</Text>
-    </View>;
+    return (
+      <View style={{ height, justifyContent: 'center', alignItems: 'center' }}>
+        <Text style={{ color: Colors.greenDim, fontSize: 9 }}>COLLECTING DATA...</Text>
+      </View>
+    );
   }
 
   const max = Math.max(...data, 1);
@@ -141,14 +138,11 @@ function HashGraph({ data }) {
           <Stop offset="100%" stopColor="#39ff14" stopOpacity="0" />
         </LinearGradient>
       </Defs>
-      {/* Grid lines */}
       {[0.25, 0.5, 0.75].map(t => (
         <Line key={t} x1={pad} y1={height * t} x2={width - pad} y2={height * t}
           stroke={Colors.border} strokeWidth="1" />
       ))}
-      {/* Area fill */}
       <Path d={areaPath} fill="url(#grad)" />
-      {/* Line */}
       <Path d={linePath} stroke="#39ff14" strokeWidth="1.5" fill="none" opacity="0.9" />
     </Svg>
   );

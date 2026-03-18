@@ -1,11 +1,11 @@
 # CapStash Wallet — Native NDK Miner
-# v2.0 — Whirlpool-512 C++ miner for Android ARM64
+# v2.1 — added sha256.c for txid/merkle root computation
 #
 # Place this file at:
 # android/app/src/main/cpp/CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.22.1)
-project(capstash_miner VERSION 2.0.0 LANGUAGES C CXX)
+project(capstash_miner VERSION 2.1.0 LANGUAGES C CXX)
 
 # ── C/C++ standards ───────────────────────────────────────────────────────────
 set(CMAKE_C_STANDARD 11)
@@ -15,7 +15,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ── ARM64 optimizations ───────────────────────────────────────────────────────
 if(ANDROID_ABI STREQUAL "arm64-v8a")
-    # Enable NEON SIMD intrinsics — available on all ARMv8 (Snapdragon 765G included)
     set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -O3 -march=armv8-a+crypto -mfpu=neon")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=armv8-a+crypto -mfpu=neon")
     message(STATUS "[CapStash] ARM64 NEON + crypto extensions enabled")
@@ -30,10 +29,13 @@ add_library(
     capstash_miner
     SHARED
 
-    # Whirlpool-512 hash engine
+    # Whirlpool-512 PoW hash engine
     whirlpool.c
 
-    # Minimal HTTP RPC client (getblocktemplate / submitblock)
+    # SHA-256 / SHA-256d — used for txid and merkle root (NOT for PoW)
+    sha256.c
+
+    # Minimal HTTP RPC client (getblocktemplate / submitblock / getbestblockhash)
     rpc.c
 
     # Mining loop — nonce iteration, header construction, thread management
@@ -53,8 +55,8 @@ find_library(log-lib log)
 find_library(android-lib android)
 
 target_link_libraries(capstash_miner
-    ${log-lib}      # __android_log_print
-    ${android-lib}  # Android asset manager (future: read conf from assets)
+    ${log-lib}
+    ${android-lib}
 )
 
 # ── Build info ────────────────────────────────────────────────────────────────

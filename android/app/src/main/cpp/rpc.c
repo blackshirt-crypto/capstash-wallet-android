@@ -183,7 +183,7 @@ int rpc_getblocktemplate(const rpc_config_t *cfg, block_template_t *tmpl) {
 
 // ── submitblock ───────────────────────────────────────────────────────────────
 int rpc_submitblock(const rpc_config_t *cfg, const char *block_hex) {
-    char req[65600];  // block hex can be large
+    char req[262144];  // 256KB — handles large blocks safely
     snprintf(req, sizeof(req),
         "{\"jsonrpc\":\"1.0\",\"id\":\"miner\",\"method\":\"submitblock\","
         "\"params\":[\"%s\"]}", block_hex);

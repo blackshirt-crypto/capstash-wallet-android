@@ -15,22 +15,17 @@ import NetworkScreen  from './screens/NetworkScreen';
 import SoloScreen     from './screens/SoloScreen';
 import FieldManual    from './components/FieldManual';
 import SetupMenu      from './components/Setupmenu';
-import { getBlockCount, getMiningInfo, getNetworkHashPs, loadAppMode } from './services/rpc';
+import { getBlockCount, getMiningInfo, loadAppMode } from './services/rpc';
 import Colors    from './theme/colors';
 import Typography from './theme/typography';
 
 const Tab = createBottomTabNavigator();
 
-// ── App mode ─────────────────────────────────────────────────
-// 'DRIFTER'  = companion wallet via Tailscale node
-// 'WANDERER' = self-contained node (future)
-
-// ── Default node config ──────────────────────────────────────
 const DEFAULT_NODE = {
-  ip:          '100.x.x.x',    // ← your Tailscale IP here (no port)
-  port:        '8332',         // ← port as its own field
-  rpcuser:     'capstashuser', // ← your rpcuser
-  rpcpassword: 'wasteland',    // ← your rpcpassword
+  ip:          '100.x.x.x',
+  port:        '8332',
+  rpcuser:     'capstashuser',
+  rpcpassword: 'wasteland',
 };
 
 export default function App() {
@@ -44,47 +39,29 @@ export default function App() {
   const [appMode,     setAppMode]     = useState('DRIFTER');
 
   const tickerAnim = useRef(new Animated.Value(0)).current;
-  const blinkAnim  = useRef(new Animated.Value(1)).current;
 
-  // ── Load persisted app mode on boot ─────────────────────
+  // ── Load persisted app mode on boot ───────────────────────
   useEffect(() => {
-    loadAppMode().then(m => { if (m) setAppMode(m); });
-  }, []);
+  loadAppMode().then(m => {
+    if (!m) return;
+    // Map legacy mode strings to display names
+    if (m === 'connected'   || m === 'DRIFTER')  { setAppMode('DRIFTER');  return; }
+    if (m === 'standalone'  || m === 'WANDERER') { setAppMode('WANDERER'); return; }
+    setAppMode('DRIFTER'); // safe fallback
+  });
+}, []);
 
-  // ── Ticker — seamless looping ────────────────────────────
-  useEffect(() => {
-    Animated.loop(
-      Animated.timing(tickerAnim, {
-        toValue:         1,
-        duration:        30000,
-        easing:          Easing.linear,
-        useNativeDriver: true,
-      })
-    ).start();
-  }, []);
-
-  // ── Cursor blink ─────────────────────────────────────────
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(blinkAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
-        Animated.timing(blinkAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
-      ])
-    ).start();
-  }, []);
-
-  // ── Poll node stats ──────────────────────────────────────
+  // ── Poll node stats ────────────────────────────────────────
   useEffect(() => {
     const poll = async () => {
       try {
-        const [h, mining, hashps] = await Promise.all([
+        const [h, mining] = await Promise.all([
           getBlockCount(nodeConfig),
           getMiningInfo(nodeConfig),
-          getNetworkHashPs(nodeConfig),
         ]);
         setBlockHeight(h);
-        setDifficulty(mining?.difficulty || 0);
-        setNetworkHash(hashps || 0);
+        setDifficulty(mining?.difficulty     || 0);
+        setNetworkHash(mining?.networkhashps || 0);
         setIsOnline(true);
       } catch {
         setIsOnline(false);
@@ -95,7 +72,7 @@ export default function App() {
     return () => clearInterval(id);
   }, [nodeConfig]);
 
-  // ── Formatters ───────────────────────────────────────────
+  // ── Formatters ─────────────────────────────────────────────
   const formatHash = (hs) => {
     if (!hs || hs === 0) return '-- H/s';
     if (hs >= 1e9) return `${(hs / 1e9).toFixed(2)} GH/s`;
@@ -114,10 +91,20 @@ export default function App() {
 
   const statusColor = isOnline ? Colors.green : Colors.amber;
 
-  // Duplicate the segment so the loop seam is invisible
-  const tickerSegment = `  ⚠  BLK #${blockHeight}   NET ${formatHash(networkHash)}   DIFF ${formatDiff(difficulty)}   STAY VIGILANT ${appMode}   `;
-  const tickerText    = tickerSegment + tickerSegment;
-  const tickerWidth   = tickerText.length * 7.2;
+  // Ticker — scrolls from right edge across screen, resets on data refresh
+  const tickerSegment = `◈ NET ${formatHash(networkHash)}--DIFF ${formatDiff(difficulty)}--BLK #${blockHeight}---STAY VIGILANT · STAY SAFE · STACK CAPS---`;
+  const TICKER_SCROLL = tickerSegment.length * 10.0;
+
+  // Reset and restart ticker on every data update
+  useEffect(() => {
+    tickerAnim.setValue(0);
+    Animated.timing(tickerAnim, {
+      toValue:         1,
+      duration:        60000,
+      easing:          Easing.linear,
+      useNativeDriver: true,
+    }).start();
+  }, [networkHash, difficulty, blockHeight]);
 
   return (
     <SafeAreaProvider>
@@ -127,46 +114,48 @@ export default function App() {
 
           {/* ── App Header ── */}
           <View style={styles.header}>
+
             {/* Left — logo */}
-            <View>
+            <View style={styles.logoBlock}>
               <Text style={styles.logo}>CapStash</Text>
-              <Text style={styles.logoSub}>WALLET OF THE WASTELAND</Text>
             </View>
+
             {/* Right — mode indicator + B.S.G. */}
             <View style={styles.headerRight}>
-              {/* Mode/status — tap opens setup menu */}
               <TouchableOpacity
                 style={styles.statusRow}
                 onPress={() => setShowSetup(true)}
               >
-                <Text style={[styles.modeText, { color: statusColor, textShadowColor: statusColor }]}>
+                <Text style={[styles.statusIcon, { color: statusColor }]}>☢</Text>
+                <Text style={[
+                  styles.modeText,
+                  { color: statusColor, textShadowColor: statusColor },
+                ]}>
                   {appMode}
                 </Text>
               </TouchableOpacity>
-              {/* Banjo's Survival Guide */}
               <TouchableOpacity style={styles.manualBtn} onPress={() => setShowManual(true)}>
                 <Text style={styles.manualBtnText}>B.S.G.</Text>
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* ── Ticker — seamless continuous scroll ── */}
+          {/* ── Ticker ── */}
           <View style={styles.ticker}>
             <Animated.Text
-              numberOfLines={1}
               style={[
                 styles.tickerText,
                 {
                   transform: [{
                     translateX: tickerAnim.interpolate({
                       inputRange:  [0, 1],
-                      outputRange: [0, -(tickerWidth / 2)],
+                      outputRange: [400, -(TICKER_SCROLL + 400)],
                     }),
                   }],
                 },
               ]}
             >
-              {tickerText}
+              {tickerSegment}
             </Animated.Text>
           </View>
 
@@ -180,11 +169,11 @@ export default function App() {
               tabBarLabelStyle:        styles.tabLabel,
               tabBarIcon: ({ focused }) => {
                 const icons = {
-                  VAULT:        '⬡',
-                  'P.B.G.':     '⚒',
-                  'B.D.T.':     '⛓',
-                  SIGNAL:       '∿',
-                  'SURVIVOR %': '↯',
+                  VAULT:    '⬡',
+                  'P.B.G.': '⚒',
+                  'B.D.T.': '⛓',
+                  SIGNAL:   '∿',
+                  SURVIVOR: '↯',
                 };
                 return (
                   <Text style={{
@@ -210,7 +199,7 @@ export default function App() {
             <Tab.Screen name="SIGNAL">
               {() => <NetworkScreen nodeConfig={nodeConfig} />}
             </Tab.Screen>
-            <Tab.Screen name="SURVIVOR%">
+            <Tab.Screen name="SURVIVOR">
               {() => <SoloScreen nodeConfig={nodeConfig} />}
             </Tab.Screen>
           </Tab.Navigator>
@@ -237,47 +226,55 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flex:            1,
     backgroundColor: Colors.black,
   },
 
-  // ── Header ──
+  // ── Header ──────────────────────────────────────────────────
   header: {
     flexDirection:     'row',
     justifyContent:    'space-between',
-    alignItems:        'flex-start',
+    alignItems:        'center',
     paddingHorizontal: 16,
     paddingTop:        10,
-    paddingBottom:     8,
+    paddingBottom:     10,
     borderBottomWidth: 1,
     borderBottomColor: Colors.borderDim,
     backgroundColor:   Colors.surfaceLight,
   },
+  logoBlock: {
+    flexDirection: 'column',
+  },
   logo: {
-    ...Typography.large,
+    fontFamily:       'ShareTechMono',
+    fontSize:         38,
     color:            Colors.green,
     textShadowColor:  Colors.green,
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 10,
     letterSpacing:    4,
+    lineHeight:       44,
   },
   logoSub: {
-    ...Typography.micro,
-    color:         Colors.greenDim,
-    marginTop:     2,
-    letterSpacing: 1.5,
+    fontFamily:    'ShareTechMono',
+    fontSize:      13,
+    letterSpacing: 2,
+    marginTop:     1,
   },
   headerRight: {
     alignItems: 'flex-end',
-    gap:        6,
+    gap:        8,
   },
   statusRow: {
     flexDirection: 'row',
     alignItems:    'center',
-    gap:           4,
+    gap:           6,
+  },
+  statusIcon: {
+    fontSize:  20,
   },
   modeText: {
-    ...Typography.heading,
+    fontFamily:       'ShareTechMono',
     fontSize:         22,
     letterSpacing:    3,
     textShadowOffset: { width: 0, height: 0 },
@@ -286,34 +283,38 @@ const styles = StyleSheet.create({
   manualBtn: {
     borderWidth:       1,
     borderColor:       Colors.borderDim,
-    paddingHorizontal: 6,
-    paddingVertical:   2,
+    paddingHorizontal: 10,
+    paddingVertical:   5,
   },
   manualBtnText: {
-    ...Typography.micro,
+    fontFamily:    'ShareTechMono',
+    fontSize:      13,
     color:         Colors.greenDim,
-    letterSpacing: 1,
+    letterSpacing: 2,
   },
 
-  // ── Ticker ──
+  // ── Ticker ──────────────────────────────────────────────────
   ticker: {
     backgroundColor:   '#1a0500',
     borderTopWidth:    1,
     borderTopColor:    '#3a0a00',
     borderBottomWidth: 1,
     borderBottomColor: '#3a0a00',
-    paddingVertical:   4,
+    height:            26,
     overflow:          'hidden',
-    height:            22,
   },
   tickerText: {
-    ...Typography.tiny,
+    fontFamily:    'ShareTechMono',
+    fontSize:      12,
     color:         Colors.amber,
     letterSpacing: 1,
+    lineHeight:    26,
     position:      'absolute',
+    top:           0,
+    width:         2000,
   },
 
-  // ── Tabs ──
+  // ── Tabs ────────────────────────────────────────────────────
   tabBar: {
     backgroundColor: Colors.surfaceLight,
     borderTopWidth:  1,
@@ -322,7 +323,8 @@ const styles = StyleSheet.create({
     height:          64,
   },
   tabLabel: {
-    ...Typography.micro,
+    fontFamily:    'ShareTechMono',
+    fontSize:      10,
     letterSpacing: 1,
     marginBottom:  2,
   },
