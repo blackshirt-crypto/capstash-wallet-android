@@ -13,9 +13,8 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
 import Colors      from '../theme/colors';
-import { Typography } from '../theme/typography';
+import { Typography, Fonts } from '../theme/typography';
 import { startMining, stopMining } from '../services/miner';
-import { getMiningInfo } from '../services/rpc';
 import {
   loadRigs, addRig, updateRig, deleteRig, pollRig,
 } from '../services/rigStorage';
@@ -24,7 +23,6 @@ const ADDRESS_KEY = '@capstash_mining_address';
 const THREADS_KEY = '@capstash_mining_threads';
 const RIG_POLL_MS = 30000;
 
-// ── Thread count options ───────────────────────────────────────────────────
 const THREAD_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 export default function MinerScreen({ nodeConfig, isOnline }) {
@@ -42,15 +40,14 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
   const [isMining,    setIsMining]    = useState(false);
   const [hashrate,    setHashrate]    = useState(0);
   const [blocksFound, setBlocksFound] = useState(0);
-  const [mineHeight,  setMineHeight]  = useState(null);
   const [lastBlock,   setLastBlock]   = useState(null);
   const [minerError,  setMinerError]  = useState(null);
 
   // ── Rig monitor state ──────────────────────────────────────────────────
   const [rigs,       setRigs]       = useState([]);
-  const [rigStats,   setRigStats]   = useState({});  // keyed by rig.id
+  const [rigStats,   setRigStats]   = useState({});
   const [showAddRig, setShowAddRig] = useState(false);
-  const [editingRig, setEditingRig] = useState(null); // rig being edited
+  const [editingRig, setEditingRig] = useState(null);
   const pollTimer = useRef(null);
 
   // ── QR scanner state ──────────────────────────────────────────────────
@@ -148,7 +145,6 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
   const handleSetThreads = async (n) => {
     setThreads(n);
     await AsyncStorage.setItem(THREADS_KEY, String(n));
-    // Restart miner if running with new thread count
     if (isMining && miningAddress) {
       stopMining();
       setTimeout(() => {
@@ -209,7 +205,6 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
     const saved = await addRig(rigData);
     setRigs(prev => [...prev, saved]);
     setShowAddRig(false);
-    // Poll immediately
     const stats = await pollRig(saved);
     setRigStats(prev => ({ ...prev, [saved.id]: stats }));
   };
@@ -284,8 +279,6 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
             </TouchableOpacity>
           </View>
         </ScrollView>
-
-        {/* QR Scanner Modal */}
         {renderScannerModal()}
       </KeyboardAvoidingView>
     );
@@ -300,7 +293,6 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* ── PHONE MINER ── */}
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={[Typography.labelSmall, styles.sectionLabel]}>⚒ PIP BOY GRINDER</Text>
@@ -309,13 +301,11 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
             </TouchableOpacity>
           </View>
 
-          {/* Address display */}
           <View style={styles.addressDisplay}>
             <Text style={[Typography.micro, styles.dimLabel]}>REWARD ADDRESS</Text>
             <Text style={[Typography.tiny, styles.addressValue]}>{shortAddr(miningAddress)}</Text>
           </View>
 
-          {/* Thread selector */}
           <View style={styles.threadSection}>
             <Text style={[Typography.micro, styles.dimLabel]}>THREADS</Text>
             <View style={styles.threadRow}>
@@ -336,7 +326,6 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
             </View>
           </View>
 
-          {/* Hashrate display */}
           <View style={styles.hashrateBox}>
             <Text style={[Typography.micro, styles.dimLabel]}>PHONE HASHRATE</Text>
             <Text style={[Typography.gigantic, styles.hashrateValue]}>
@@ -344,7 +333,6 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
             </Text>
           </View>
 
-          {/* Blocks / Height */}
           <View style={styles.statsRow}>
             <View style={styles.statCell}>
               <Text style={[Typography.micro, styles.dimLabel]}>BLOCKS FOUND</Text>
@@ -359,7 +347,6 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
             </View>
           </View>
 
-          {/* Last block */}
           {lastBlock && (
             <View style={styles.lastBlockBox}>
               <Text style={[Typography.micro, styles.dimLabel]}>LAST BLOCK FOUND</Text>
@@ -370,14 +357,12 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
             </View>
           )}
 
-          {/* Error display */}
           {minerError && (
             <Text style={[Typography.tiny, styles.errorText, { marginBottom: 8 }]}>
               ⚠ {minerError}
             </Text>
           )}
 
-          {/* Start / Stop */}
           <TouchableOpacity
             style={[
               styles.mineButton,
@@ -403,10 +388,8 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
           )}
         </View>
 
-        {/* ── DIVIDER ── */}
         <View style={styles.divider} />
 
-        {/* ── RIG MONITOR ── */}
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={[Typography.labelSmall, styles.sectionLabel]}>⬡ RIG MONITOR</Text>
@@ -437,10 +420,8 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
         </View>
       </ScrollView>
 
-      {/* QR Scanner Modal */}
       {renderScannerModal()}
 
-      {/* Add / Edit Rig Modal */}
       <RigFormModal
         visible={showAddRig}
         rig={editingRig}
@@ -453,14 +434,12 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
     </>
   );
 
-  // ── QR Scanner Modal renderer ──────────────────────────────────────────
   function renderScannerModal() {
     return (
       <Modal visible={scannerOpen} animationType="slide" onRequestClose={() => setScannerOpen(false)}>
         <View style={styles.scannerContainer}>
           <Text style={[Typography.labelSmall, styles.scannerTitle]}>SCAN WALLET ADDRESS</Text>
           <Text style={[Typography.micro, styles.scannerHint]}>POINT CAMERA AT QR CODE</Text>
-
           {device ? (
             <Camera
               style={styles.camera}
@@ -473,11 +452,9 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
               <Text style={[Typography.micro, styles.dimLabel]}>CAMERA UNAVAILABLE</Text>
             </View>
           )}
-
           <View style={styles.reticleOverlay} pointerEvents="none">
             <View style={styles.reticle} />
           </View>
-
           <TouchableOpacity style={styles.cancelScanButton} onPress={() => setScannerOpen(false)}>
             <Text style={[Typography.labelSmall, styles.cancelScanText]}>[ CANCEL ]</Text>
           </TouchableOpacity>
@@ -490,7 +467,7 @@ export default function MinerScreen({ nodeConfig, isOnline }) {
 // ── Rig card component ─────────────────────────────────────────────────────
 function RigCard({ rig, stats, onEdit, onDelete, formatHashrate }) {
   const [expanded, setExpanded] = useState(false);
-  const online = stats?.online ?? null; // null = not yet polled
+  const online = stats?.online ?? null;
 
   const dotColor = online === null
     ? Colors.greenDim
@@ -507,13 +484,10 @@ function RigCard({ rig, stats, onEdit, onDelete, formatHashrate }) {
       activeOpacity={0.8}
     >
       <View style={styles.rigCardHeader}>
-        {/* Status dot + name */}
         <View style={styles.rigNameRow}>
           <View style={[styles.rigDot, { backgroundColor: dotColor }]} />
           <Text style={[Typography.labelSmall, styles.rigName]}>{rig.name}</Text>
         </View>
-
-        {/* Quick stats */}
         <View style={styles.rigQuickStats}>
           {online && (
             <>
@@ -537,20 +511,15 @@ function RigCard({ rig, stats, onEdit, onDelete, formatHashrate }) {
         </View>
       </View>
 
-      {/* Expanded details */}
       {expanded && (
         <View style={styles.rigExpandedBody}>
           <View style={styles.rigDetailRow}>
             <Text style={[Typography.micro, styles.dimLabel]}>LOCAL IP</Text>
-            <Text style={[Typography.tiny, styles.rigDetailValue]}>
-              {rig.localIp || '—'}
-            </Text>
+            <Text style={[Typography.tiny, styles.rigDetailValue]}>{rig.localIp || '—'}</Text>
           </View>
           <View style={styles.rigDetailRow}>
             <Text style={[Typography.micro, styles.dimLabel]}>TAILSCALE IP</Text>
-            <Text style={[Typography.tiny, styles.rigDetailValue]}>
-              {rig.tailscaleIp || '—'}
-            </Text>
+            <Text style={[Typography.tiny, styles.rigDetailValue]}>{rig.tailscaleIp || '—'}</Text>
           </View>
           {online && stats && (
             <>
@@ -595,7 +564,6 @@ function RigFormModal({ visible, rig, onSave, onClose, onDelete }) {
   const [testing,     setTesting]     = useState(false);
   const [testResult,  setTestResult]  = useState(null);
 
-  // Populate when editing
   useEffect(() => {
     if (visible && rig) {
       setName(rig.name        || '');
@@ -612,9 +580,9 @@ function RigFormModal({ visible, rig, onSave, onClose, onDelete }) {
   }, [visible, rig]);
 
   const validate = () => {
-    if (!name.trim())                        return 'RIG NAME IS REQUIRED';
+    if (!name.trim())                           return 'RIG NAME IS REQUIRED';
     if (!localIp.trim() && !tailscaleIp.trim()) return 'ENTER AT LEAST ONE IP ADDRESS';
-    if (!user.trim() || !pass.trim())        return 'RPC CREDENTIALS ARE REQUIRED';
+    if (!user.trim() || !pass.trim())           return 'RPC CREDENTIALS ARE REQUIRED';
     return null;
   };
 
@@ -645,7 +613,6 @@ function RigFormModal({ visible, rig, onSave, onClose, onDelete }) {
           contentContainerStyle={styles.rigFormContainer}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Header */}
           <View style={styles.rigFormHeader}>
             <Text style={[Typography.labelSmall, styles.sectionLabel]}>
               {rig ? 'EDIT RIG' : 'ADD RIG'}
@@ -736,7 +703,6 @@ function RigFormModal({ visible, rig, onSave, onClose, onDelete }) {
             <Text style={[Typography.tiny, styles.errorText, { marginTop: 8 }]}>{error}</Text>
           ) : null}
 
-          {/* Test button */}
           <TouchableOpacity
             style={[
               styles.testRigBtn,
@@ -759,14 +725,12 @@ function RigFormModal({ visible, rig, onSave, onClose, onDelete }) {
             }
           </TouchableOpacity>
 
-          {/* Save button */}
           <TouchableOpacity style={styles.saveRigBtn} onPress={handleSave}>
             <Text style={[Typography.labelSmall, styles.saveRigBtnText]}>
               {rig ? 'SAVE CHANGES' : 'ADD RIG'}
             </Text>
           </TouchableOpacity>
 
-          {/* Delete button (edit mode only) */}
           {onDelete && (
             <TouchableOpacity style={styles.deleteRigBtn} onPress={onDelete}>
               <Text style={[Typography.micro, styles.deleteRigBtnText]}>
@@ -782,460 +746,95 @@ function RigFormModal({ visible, rig, onSave, onClose, onDelete }) {
 
 // ── Styles ─────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.black,
-  },
-  content: {
-    paddingBottom: 32,
-  },
-  section: {
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: 8,
-  },
-  sectionLabel: {
-    color: Colors.green,
-    letterSpacing: 2,
-    marginBottom: 12,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: Colors.green,
-    opacity: 0.25,
-    marginHorizontal: 16,
-    marginVertical: 8,
-  },
-  dimLabel: {
-    color: Colors.greenDim,
-    letterSpacing: 1.5,
-    marginBottom: 4,
-  },
-  errorText: {
-    color: Colors.red,
-    letterSpacing: 1,
-  },
-  editBtn: {
-    color: Colors.green,
-    opacity: 0.5,
-    letterSpacing: 1,
-  },
-  optionalTag: {
-    color: Colors.greenDim,
-    fontSize: 9,
-  },
+  container:       { flex: 1, backgroundColor: Colors.black },
+  content:         { paddingBottom: 32 },
+  section:         { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
+  sectionLabel:    { color: Colors.green, letterSpacing: 2, marginBottom: 12 },
+  sectionHeaderRow:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  divider:         { height: 1, backgroundColor: Colors.green, opacity: 0.25, marginHorizontal: 16, marginVertical: 8 },
+  dimLabel:        { color: Colors.greenDim, letterSpacing: 1.5, marginBottom: 4 },
+  errorText:       { color: Colors.red, letterSpacing: 1 },
+  editBtn:         { color: Colors.green, opacity: 0.5, letterSpacing: 1 },
+  optionalTag:     { color: Colors.greenDim, fontSize: 11 },
 
-  // ── Address setup ──
-  setupContainer: {
-    padding: 16,
-    paddingTop: 24,
-  },
-  setupPrompt: {
-    color: Colors.amber,
-    letterSpacing: 2,
-    marginBottom: 8,
-  },
-  setupHint: {
-    color: Colors.greenDim,
-    letterSpacing: 1,
-    lineHeight: 18,
-    marginBottom: 16,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  addressInput: {
-    borderWidth: 1,
-    borderColor: Colors.green,
-    borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: Colors.green,
-    fontFamily: 'ShareTechMono',
-    fontSize: 13,
-    marginBottom: 8,
-  },
-  addressInputFlex: {
-    flex: 1,
-    marginBottom: 0,
-  },
-  addressInputError: {
-    borderColor: Colors.red,
-  },
-  qrButton: {
-    borderWidth: 1,
-    borderColor: Colors.green,
-    borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  qrButtonText: {
-    color: Colors.green,
-    fontFamily: 'ShareTechMono',
-    fontSize: 13,
-    letterSpacing: 1,
-  },
-  addressButtonRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 4,
-  },
-  addrButton: {
-    flex: 1,
-    borderRadius: 4,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  addrButtonPrimary: {
-    borderColor: Colors.green,
-    backgroundColor: Colors.green,
-  },
-  addrButtonSecondary: {
-    borderColor: Colors.green,
-  },
-  addrButtonTextPrimary: {
-    color: Colors.black,
-    letterSpacing: 1.5,
-  },
-  addrButtonTextSecondary: {
-    color: Colors.green,
-    letterSpacing: 1.5,
-  },
+  setupContainer:  { padding: 16, paddingTop: 24 },
+  setupPrompt:     { color: Colors.amber, letterSpacing: 2, marginBottom: 8 },
+  setupHint:       { color: Colors.greenDim, letterSpacing: 1, lineHeight: 20, marginBottom: 16 },
+  inputRow:        { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  addressInput:    { borderWidth: 1, borderColor: Colors.green, borderRadius: 4, paddingHorizontal: 12, paddingVertical: 10, color: Colors.green, fontFamily: Fonts.mono, fontSize: 15, marginBottom: 8 },
+  addressInputFlex:{ flex: 1, marginBottom: 0 },
+  addressInputError:{ borderColor: Colors.red },
+  qrButton:        { borderWidth: 1, borderColor: Colors.green, borderRadius: 4, paddingHorizontal: 12, paddingVertical: 11, justifyContent: 'center', alignItems: 'center' },
+  qrButtonText:    { color: Colors.green, fontFamily: Fonts.mono, fontSize: 15, letterSpacing: 1 },
+  addressButtonRow:{ flexDirection: 'row', gap: 10, marginTop: 4 },
+  addrButton:      { flex: 1, borderRadius: 4, paddingVertical: 12, alignItems: 'center', borderWidth: 1 },
+  addrButtonPrimary:  { borderColor: Colors.green, backgroundColor: Colors.green },
+  addrButtonSecondary:{ borderColor: Colors.green },
+  addrButtonTextPrimary:  { color: Colors.black, letterSpacing: 1.5 },
+  addrButtonTextSecondary:{ color: Colors.green, letterSpacing: 1.5 },
 
-  // ── Active miner ──
-  addressDisplay: {
-    marginBottom: 14,
-  },
-  addressValue: {
-    color: Colors.greenDim,
-    fontFamily: 'ShareTechMono',
-  },
+  addressDisplay:  { marginBottom: 14 },
+  addressValue:    { color: Colors.greenDim, fontFamily: Fonts.mono },
+  threadSection:   { marginBottom: 16 },
+  threadRow:       { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  threadBtn:       { width: 36, height: 36, borderWidth: 1, borderColor: Colors.border, borderRadius: 4, justifyContent: 'center', alignItems: 'center' },
+  threadBtnActive: { borderColor: Colors.green, backgroundColor: Colors.green },
+  threadBtnText:   { color: Colors.greenDim, fontFamily: Fonts.mono },
+  threadBtnTextActive:{ color: Colors.black },
+  hashrateBox:     { alignItems: 'center', marginBottom: 20 },
+  hashrateValue:   { color: Colors.green, textAlign: 'center' },
+  statsRow:        { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20 },
+  statCell:        { flex: 1, alignItems: 'center' },
+  statDivider:     { width: 1, backgroundColor: Colors.green, opacity: 0.3 },
+  statValue:       { color: Colors.green },
+  lastBlockBox:    { borderWidth: 1, borderColor: Colors.green, borderRadius: 4, padding: 10, marginBottom: 16, opacity: 0.8 },
+  hashText:        { color: Colors.greenDim, fontFamily: Fonts.mono, marginTop: 2 },
+  mineButton:      { borderWidth: 1, borderColor: Colors.green, borderRadius: 4, paddingVertical: 14, alignItems: 'center', marginBottom: 8 },
+  mineButtonActive:{ backgroundColor: Colors.green },
+  mineButtonDisabled:{ opacity: 0.3 },
+  mineButtonText:  { color: Colors.green, letterSpacing: 2 },
+  mineButtonTextActive:{ color: Colors.black },
+  offlineNote:     { color: Colors.red, textAlign: 'center', letterSpacing: 1, marginTop: 4 },
 
-  // ── Thread selector ──
-  threadSection: {
-    marginBottom: 16,
-  },
-  threadRow: {
-    flexDirection: 'row',
-    gap: 6,
-    flexWrap: 'wrap',
-  },
-  threadBtn: {
-    width: 34,
-    height: 34,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  threadBtnActive: {
-    borderColor: Colors.green,
-    backgroundColor: Colors.green,
-  },
-  threadBtnText: {
-    color: Colors.greenDim,
-    fontFamily: 'ShareTechMono',
-  },
-  threadBtnTextActive: {
-    color: Colors.black,
-  },
+  addRigBtn:       { borderWidth: 1, borderColor: Colors.green, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 5 },
+  addRigBtnText:   { color: Colors.green, letterSpacing: 1 },
+  rigCard:         { borderWidth: 1, borderColor: Colors.border, borderRadius: 4, marginBottom: 8, backgroundColor: Colors.surface },
+  rigCardHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12 },
+  rigNameRow:      { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  rigDot:          { width: 10, height: 10, borderRadius: 5 },
+  rigName:         { color: Colors.green, letterSpacing: 1 },
+  rigQuickStats:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  rigStat:         { color: Colors.green, fontFamily: Fonts.mono },
+  rigStatDim:      { color: Colors.greenDim, fontFamily: Fonts.mono },
+  rigExpandArrow:  { color: Colors.greenDim, marginLeft: 4 },
+  rigExpandedBody: { borderTopWidth: 1, borderTopColor: Colors.border, padding: 12 },
+  rigDetailRow:    { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  rigDetailValue:  { color: Colors.green, fontFamily: Fonts.mono },
+  rigActions:      { flexDirection: 'row', gap: 16, marginTop: 10 },
+  rigActionBtn:    { paddingVertical: 4 },
+  rigActionEdit:   { color: Colors.green, letterSpacing: 1 },
+  rigActionDelete: { color: Colors.red, letterSpacing: 1 },
 
-  // ── Hashrate ──
-  hashrateBox: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  hashrateValue: {
-    color: Colors.green,
-    textAlign: 'center',
-  },
+  rigFormContainer:{ padding: 16, paddingTop: 52, paddingBottom: 32 },
+  rigFormHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  rigInput:        { borderWidth: 1, borderColor: Colors.border, borderRadius: 4, paddingHorizontal: 12, paddingVertical: 10, color: Colors.green, fontFamily: Fonts.mono, fontSize: 15, marginBottom: 4, backgroundColor: Colors.black },
+  showPassBtn:     { borderWidth: 1, borderColor: Colors.border, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 10, marginLeft: 8, justifyContent: 'center' },
+  testRigBtn:      { marginTop: 16, borderWidth: 1, borderColor: Colors.amberDim, borderRadius: 4, padding: 11, alignItems: 'center', minHeight: 40, justifyContent: 'center' },
+  testRigBtnOk:    { borderColor: Colors.green },
+  testRigBtnFail:  { borderColor: Colors.red },
+  testRigBtnText:  { color: Colors.amber, letterSpacing: 2 },
+  saveRigBtn:      { marginTop: 10, borderWidth: 1, borderColor: Colors.green, borderRadius: 4, paddingVertical: 14, alignItems: 'center', backgroundColor: Colors.green },
+  saveRigBtnText:  { color: Colors.black, letterSpacing: 2 },
+  deleteRigBtn:    { marginTop: 8, paddingVertical: 12, alignItems: 'center' },
+  deleteRigBtnText:{ color: Colors.red, letterSpacing: 1 },
 
-  // ── Stats row ──
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 20,
-  },
-  statCell: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statDivider: {
-    width: 1,
-    backgroundColor: Colors.green,
-    opacity: 0.3,
-  },
-  statValue: {
-    color: Colors.green,
-  },
-
-  // ── Last block ──
-  lastBlockBox: {
-    borderWidth: 1,
-    borderColor: Colors.green,
-    borderRadius: 4,
-    padding: 10,
-    marginBottom: 16,
-    opacity: 0.8,
-  },
-  hashText: {
-    color: Colors.greenDim,
-    fontFamily: 'ShareTechMono',
-    marginTop: 2,
-  },
-
-  // ── Mine button ──
-  mineButton: {
-    borderWidth: 1,
-    borderColor: Colors.green,
-    borderRadius: 4,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  mineButtonActive: {
-    backgroundColor: Colors.green,
-  },
-  mineButtonDisabled: {
-    opacity: 0.3,
-  },
-  mineButtonText: {
-    color: Colors.green,
-    letterSpacing: 2,
-  },
-  mineButtonTextActive: {
-    color: Colors.black,
-  },
-  offlineNote: {
-    color: Colors.red,
-    textAlign: 'center',
-    letterSpacing: 1,
-    marginTop: 4,
-  },
-
-  // ── Rig monitor ──
-  addRigBtn: {
-    borderWidth: 1,
-    borderColor: Colors.green,
-    borderRadius: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  addRigBtnText: {
-    color: Colors.green,
-    letterSpacing: 1,
-  },
-  rigCard: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 4,
-    marginBottom: 8,
-    backgroundColor: Colors.surface,
-  },
-  rigCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-  },
-  rigNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-  },
-  rigDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  rigName: {
-    color: Colors.green,
-    letterSpacing: 1,
-  },
-  rigQuickStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  rigStat: {
-    color: Colors.green,
-    fontFamily: 'ShareTechMono',
-  },
-  rigStatDim: {
-    color: Colors.greenDim,
-    fontFamily: 'ShareTechMono',
-  },
-  rigExpandArrow: {
-    color: Colors.greenDim,
-    marginLeft: 4,
-  },
-  rigExpandedBody: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    padding: 12,
-  },
-  rigDetailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  rigDetailValue: {
-    color: Colors.green,
-    fontFamily: 'ShareTechMono',
-  },
-  rigActions: {
-    flexDirection: 'row',
-    gap: 16,
-    marginTop: 10,
-  },
-  rigActionBtn: {
-    paddingVertical: 4,
-  },
-  rigActionEdit: {
-    color: Colors.green,
-    letterSpacing: 1,
-  },
-  rigActionDelete: {
-    color: Colors.red,
-    letterSpacing: 1,
-  },
-
-  // ── Rig form modal ──
-  rigFormContainer: {
-    padding: 16,
-    paddingTop: 52,
-    paddingBottom: 32,
-  },
-  rigFormHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  rigInput: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: Colors.green,
-    fontFamily: 'ShareTechMono',
-    fontSize: 13,
-    marginBottom: 4,
-    backgroundColor: Colors.black,
-  },
-  showPassBtn: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    marginLeft: 8,
-    justifyContent: 'center',
-  },
-  testRigBtn: {
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: Colors.amberDim,
-    borderRadius: 4,
-    padding: 11,
-    alignItems: 'center',
-    minHeight: 40,
-    justifyContent: 'center',
-  },
-  testRigBtnOk:   { borderColor: Colors.green },
-  testRigBtnFail: { borderColor: Colors.red },
-  testRigBtnText: {
-    color: Colors.amber,
-    letterSpacing: 2,
-  },
-  saveRigBtn: {
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: Colors.green,
-    borderRadius: 4,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: Colors.green,
-  },
-  saveRigBtnText: {
-    color: Colors.black,
-    letterSpacing: 2,
-  },
-  deleteRigBtn: {
-    marginTop: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  deleteRigBtnText: {
-    color: Colors.red,
-    letterSpacing: 1,
-  },
-
-  // ── QR Scanner ──
-  scannerContainer: {
-    flex: 1,
-    backgroundColor: Colors.black,
-    alignItems: 'center',
-    paddingTop: 60,
-  },
-  scannerTitle: {
-    color: Colors.green,
-    letterSpacing: 2,
-    marginBottom: 6,
-  },
-  scannerHint: {
-    color: Colors.greenDim,
-    letterSpacing: 1.5,
-    marginBottom: 24,
-  },
-  camera: {
-    width: '100%',
-    flex: 1,
-  },
-  cameraPlaceholder: {
-    width: '100%',
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.green,
-    opacity: 0.4,
-  },
-  reticleOverlay: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 80,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  reticle: {
-    width: 220,
-    height: 220,
-    borderWidth: 2,
-    borderColor: Colors.green,
-    borderRadius: 8,
-    opacity: 0.8,
-  },
-  cancelScanButton: {
-    paddingVertical: 20,
-    paddingHorizontal: 40,
-  },
-  cancelScanText: {
-    color: Colors.green,
-    letterSpacing: 2,
-  },
+  scannerContainer:{ flex: 1, backgroundColor: Colors.black, alignItems: 'center', paddingTop: 60 },
+  scannerTitle:    { color: Colors.green, letterSpacing: 2, marginBottom: 6 },
+  scannerHint:     { color: Colors.greenDim, letterSpacing: 1.5, marginBottom: 24 },
+  camera:          { width: '100%', flex: 1 },
+  cameraPlaceholder:{ width: '100%', flex: 1, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: Colors.green, opacity: 0.4 },
+  reticleOverlay:  { position: 'absolute', top: 0, left: 0, right: 0, bottom: 80, justifyContent: 'center', alignItems: 'center' },
+  reticle:         { width: 220, height: 220, borderWidth: 2, borderColor: Colors.green, borderRadius: 8, opacity: 0.8 },
+  cancelScanButton:{ paddingVertical: 20, paddingHorizontal: 40 },
+  cancelScanText:  { color: Colors.green, letterSpacing: 2 },
 });

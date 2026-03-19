@@ -201,10 +201,15 @@ async function rpcCall(nodeConfig, method, params = []) {
       },
       body,
     });
+
     if (!res.ok) {
-      throw new Error(`RPC_AUTH_FAIL: ${res.status} ${res.statusText}`);
+      const errText = await res.text();
+      const errJson = JSON.parse(errText);
+      throw new Error(errJson?.error?.message || `RPC_ERROR: ${res.status}`);
     }
-    const json = await res.json();
+
+    const text = await res.text();
+    const json = JSON.parse(text);
     if (json.error) throw new Error(json.error.message || 'RPC_ERROR');
     _recordSuccess();
     return json.result;
@@ -305,6 +310,7 @@ export async function getPeerInfo(nodeConfig = null) {
 export async function getRawMempool(nodeConfig = null) {
   return rpcCall(nodeConfig, 'getrawmempool');
 }
+
 export async function getMempoolInfo(nodeConfig = null) {
   return rpcCall(nodeConfig, 'getmempoolinfo');
 }

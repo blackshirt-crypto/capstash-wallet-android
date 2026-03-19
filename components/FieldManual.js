@@ -1,6 +1,7 @@
 // components/FieldManual.js
 // W.O.W. — Banjo's Survival Guide overlay
 // Full badge legend + tier system explanation + lore
+
 import React from 'react';
 import {
   Modal, View, Text, ScrollView,
@@ -8,7 +9,7 @@ import {
 } from 'react-native';
 import { BADGES, BADGE_GROUPS } from '../utils/badges';
 import Colors from '../theme/colors';
-import Typography from '../theme/typography';
+import { Typography, Fonts } from '../theme/typography';
 
 export default function FieldManual({ visible, onClose }) {
   return (
@@ -168,10 +169,7 @@ function TierRow({ name, tier, color, odds, desc }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.black,
-  },
+  container: { flex: 1, backgroundColor: Colors.black },
   header: {
     flexDirection:     'row',
     justifyContent:    'space-between',
@@ -199,15 +197,10 @@ const styles = StyleSheet.create({
     color:         Colors.greenDim,
     letterSpacing: 2,
   },
-  scroll: {
-    flex:    1,
-    padding: 16,
-  },
-  section: {
-    marginBottom: 20,
-  },
+  scroll: { flex: 1, padding: 16 },
+  section: { marginBottom: 20 },
   sectionTitle: {
-    ...Typography.label,
+    ...Typography.labelSmall,
     color:             Colors.greenDim,
     marginBottom:      10,
     paddingBottom:     4,
@@ -217,34 +210,21 @@ const styles = StyleSheet.create({
   manualRow: {
     flexDirection:     'row',
     alignItems:        'flex-start',
-    paddingVertical:   6,
+    paddingVertical:   8,
     borderBottomWidth: 1,
     borderBottomColor: '#050f04',
     gap:               10,
   },
-  manualIcon: {
-    fontSize:  18,
-    width:     26,
-    textAlign: 'center',
-  },
-  manualText: {
-    flex: 1,
-  },
-  manualName: {
-    ...Typography.small,
-    letterSpacing: 1,
-    marginBottom:  2,
-  },
-  manualDesc: {
-    ...Typography.micro,
-    color:      Colors.greenDim,
-    lineHeight: 14,
-  },
+  manualIcon: { fontSize: 20, width: 28, textAlign: 'center' },
+  manualText: { flex: 1 },
+  manualName: { ...Typography.small, letterSpacing: 1, marginBottom: 2 },
+  manualDesc: { ...Typography.micro, color: Colors.greenDim, lineHeight: 16 },
+
   tierIntro: {
     ...Typography.tiny,
-    color:        Colors.greenDim,
-    lineHeight:   16,
-    marginBottom: 10,
+    color:         Colors.greenDim,
+    lineHeight:    18,
+    marginBottom:  10,
     letterSpacing: 0.5,
   },
   tierRow: {
@@ -254,24 +234,11 @@ const styles = StyleSheet.create({
     padding:         10,
     marginBottom:    5,
   },
-  tierName: {
-    ...Typography.subheading,
-    letterSpacing: 1,
-    marginBottom:  2,
-  },
-  tierLabel: {
-    ...Typography.labelSmall,
-    marginBottom: 2,
-  },
-  tierOdds: {
-    ...Typography.micro,
-    color:        Colors.greenDim,
-    marginBottom: 4,
-  },
-  tierDesc: {
-    ...Typography.micro,
-    color: Colors.greenDim,
-  },
+  tierName:  { ...Typography.subheading, letterSpacing: 1, marginBottom: 2 },
+  tierLabel: { ...Typography.labelSmall, marginBottom: 2 },
+  tierOdds:  { ...Typography.micro, color: Colors.greenDim, marginBottom: 4 },
+  tierDesc:  { ...Typography.micro, color: Colors.greenDim },
+
   aliasNote: {
     marginTop:       8,
     padding:         10,
@@ -279,17 +246,8 @@ const styles = StyleSheet.create({
     borderColor:     Colors.border,
     backgroundColor: Colors.surface,
   },
-  aliasNoteText: {
-    ...Typography.micro,
-    color:      Colors.greenDim,
-    lineHeight: 16,
-  },
-  lore: {
-    ...Typography.tiny,
-    color:         Colors.greenDim,
-    lineHeight:    18,
-    letterSpacing: 0.5,
-  },
+  aliasNoteText: { ...Typography.micro, color: Colors.greenDim, lineHeight: 18 },
+
   classifiedBox: {
     borderWidth:     1,
     borderColor:     '#3a0a00',
@@ -307,9 +265,8 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 6,
   },
-  // ── C.A.P. easter egg title ──
   capTitle: {
-    fontFamily:       'VT323-Regular',
+    fontFamily:       Fonts.display,
     fontSize:         36,
     color:            Colors.green,
     letterSpacing:    8,
@@ -322,14 +279,14 @@ const styles = StyleSheet.create({
     ...Typography.small,
     color:         Colors.amber,
     textAlign:     'center',
-    lineHeight:    18,
+    lineHeight:    20,
     letterSpacing: 1,
   },
   classifiedLore: {
     ...Typography.tiny,
     color:         Colors.greenDim,
     textAlign:     'center',
-    lineHeight:    18,
+    lineHeight:    20,
     letterSpacing: 0.5,
   },
   classifiedFooter: {

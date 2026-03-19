@@ -9,14 +9,13 @@ import {
 } from 'react-native';
 import { getMiningInfo } from '../services/rpc';
 import Colors from '../theme/colors';
-import Typography from '../theme/typography';
+import { Typography, Fonts } from '../theme/typography';
 
 // ── Constants ───────────────────────────────────────────────
-const BLOCK_TIME_SECONDS = 60;   // CapStash: 1 minute blocks
-const BLOCK_REWARD       = 1.0;  // 1 CAP per block
+const BLOCK_TIME_SECONDS = 60;
+const BLOCK_REWARD       = 1.0;
 
 // ── Luck Tiers ───────────────────────────────────────────────
-// Ordered worst → best. Thresholds are prob24h values.
 const LUCK_TIERS = [
   {
     key:       'radroach',
@@ -60,24 +59,23 @@ function getTier(prob24h) {
   return LUCK_TIERS.find(t => prob24h < t.threshold) || LUCK_TIERS[LUCK_TIERS.length - 1];
 }
 
-// ── Main Screen ──────────────────────────────────────────────
 export default function SoloScreen({ nodeConfig }) {
-  const [networkHash, setNetworkHash] = useState(175554028); // H/s
-  const [localHash,   setLocalHash]   = useState(4000000);   // H/s default 4 MH/s
-  const [difficulty,  setDifficulty]  = useState(3.128);
-  const [customLocal, setCustomLocal] = useState('');        // user override in MH/s
+  const [networkHash, setNetworkHash] = useState(0);
+  const [localHash,   setLocalHash]   = useState(0);
+  const [difficulty,  setDifficulty]  = useState(0);
+  const [customLocal, setCustomLocal] = useState('');
   const [refreshing,  setRefreshing]  = useState(false);
 
   const load = useCallback(async () => {
     try {
       const mining = await getMiningInfo(nodeConfig);
-      setNetworkHash(mining?.networkhashps || 175554028);
-      setDifficulty(mining?.difficulty || 3.128);
+      setNetworkHash(mining?.networkhashps || 0);
+      setDifficulty(mining?.difficulty || 0);
       if (mining?.localhashrate > 0) {
         setLocalHash(mining.localhashrate);
       }
     } catch (e) {
-      console.warn('SoloScreen load error:', e);
+      // silently handle — connection may not be ready yet
     }
   }, [nodeConfig]);
 
@@ -94,18 +92,22 @@ export default function SoloScreen({ nodeConfig }) {
     ? parseFloat(customLocal) * 1e6
     : localHash;
 
-  const blocksPerDay  = 86400 / BLOCK_TIME_SECONDS;            // 1440
-  const networkShare  = effectiveLocalHash / networkHash;
-  const prob24h       = 1 - Math.pow(1 - networkShare, blocksPerDay);
-  const expectedHours = (networkHash / effectiveLocalHash) * (BLOCK_TIME_SECONDS / 3600);
+  const blocksPerDay   = 86400 / BLOCK_TIME_SECONDS;
+  const networkShare   = networkHash > 0 ? effectiveLocalHash / networkHash : 0;
+  const prob24h        = networkHash > 0
+    ? 1 - Math.pow(1 - networkShare, blocksPerDay)
+    : 0;
+  const expectedHours  = effectiveLocalHash > 0 && networkHash > 0
+    ? (networkHash / effectiveLocalHash) * (BLOCK_TIME_SECONDS / 3600)
+    : Infinity;
   const expectedCap24h = prob24h * BLOCK_REWARD;
-  const probPercent   = (prob24h * 100).toFixed(2);
+  const probPercent    = (prob24h * 100).toFixed(2);
 
   const tier = getTier(prob24h);
 
   // ── Helpers ───────────────────────────────────────────────
   const formatHash = (hs) => {
-    if (!hs || isNaN(hs)) return '0 H/s';
+    if (!hs || isNaN(hs) || hs === 0) return '— H/s';
     if (hs >= 1e9)  return `${(hs / 1e9).toFixed(2)} GH/s`;
     if (hs >= 1e6)  return `${(hs / 1e6).toFixed(2)} MH/s`;
     if (hs >= 1e3)  return `${(hs / 1e3).toFixed(0)} KH/s`;
@@ -134,13 +136,11 @@ export default function SoloScreen({ nodeConfig }) {
         />
       }
     >
-
       {/* ── Big probability display ── */}
       <View style={[styles.probCard, { borderColor: tier.color }]}>
         <Text style={styles.probLabel}>
           ▸ SURVIVOR% — SOLO BLOCK PROBABILITY (24H)
         </Text>
-
         <Text style={[styles.probValue, {
           color:            tier.color,
           textShadowColor:  tier.glow,
@@ -149,18 +149,14 @@ export default function SoloScreen({ nodeConfig }) {
         }]}>
           {probPercent}%
         </Text>
-
-        {/* Active tier badge */}
         <View style={[styles.tierBadge, { borderColor: tier.color }]}>
           <Text style={[styles.tierBadgeLabel, { color: tier.color }]}>
             {tier.label}
           </Text>
         </View>
-
         <Text style={[styles.tierSubLabel, { color: tier.color }]}>
           {tier.subLabel}
         </Text>
-
         <Text style={styles.probSub}>
           {formatHash(effectiveLocalHash)} LOCAL  ·  {formatHash(networkHash)} NETWORK
         </Text>
@@ -173,7 +169,7 @@ export default function SoloScreen({ nodeConfig }) {
           style={styles.input}
           value={customLocal}
           onChangeText={setCustomLocal}
-          placeholder={`${(localHash / 1e6).toFixed(2)} (LIVE)`}
+          placeholder={localHash > 0 ? `${(localHash / 1e6).toFixed(2)} (LIVE)` : 'ENTER MH/s'}
           placeholderTextColor={Colors.greenDim}
           keyboardType="numeric"
         />
@@ -191,7 +187,7 @@ export default function SoloScreen({ nodeConfig }) {
       <StatRow label="BLOCKS PER DAY"   value={blocksPerDay.toFixed(0)} />
       <StatRow label="BLOCK TIME"       value={`${BLOCK_TIME_SECONDS}S (1 MIN)`} />
       <StatRow label="EXPECTED TIME"    value={formatTime(expectedHours)} />
-      <StatRow label="DIFFICULTY"       value={difficulty.toFixed(6)} />
+      <StatRow label="DIFFICULTY"       value={difficulty > 0 ? difficulty.toFixed(6) : '—'} />
       <StatRow label="BLOCK REWARD"     value={`${BLOCK_REWARD.toFixed(2)} CAP`} />
       <StatRow label="24H EXPECTED"     value={`${expectedCap24h.toFixed(4)} CAP`} />
       <StatRow label="7D EXPECTED"      value={`${(expectedCap24h * 7).toFixed(3)} CAP`} />
@@ -226,8 +222,6 @@ export default function SoloScreen({ nodeConfig }) {
   );
 }
 
-// ── Sub-components ───────────────────────────────────────────
-
 function StatRow({ label, value }) {
   return (
     <View style={styles.statRow}>
@@ -258,160 +252,66 @@ function LuckRow({ label, range, subLabel, color, active }) {
   );
 }
 
-// ── Styles ───────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.black,
-    padding: 14,
-  },
+  container: { flex: 1, backgroundColor: Colors.black, padding: 14 },
 
-  // Probability card
   probCard: {
-    borderWidth: 1,
-    backgroundColor: Colors.surface,
-    padding: 20,
-    alignItems: 'center',
-    marginBottom: 12,
+    borderWidth: 1, backgroundColor: Colors.surface,
+    padding: 20, alignItems: 'center', marginBottom: 12,
   },
   probLabel: {
     ...Typography.labelSmall,
-    color: Colors.greenDim,
-    marginBottom: 10,
-    textAlign: 'center',
+    color: Colors.greenDim, marginBottom: 10, textAlign: 'center',
   },
-  probValue: {
-    ...Typography.gigantic,
-    fontSize: 80,
-  },
+  probValue: { ...Typography.gigantic, fontSize: 80 },
   tierBadge: {
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-    marginTop: 10,
-    marginBottom: 4,
+    borderWidth: 1, paddingHorizontal: 14, paddingVertical: 4,
+    marginTop: 10, marginBottom: 4,
   },
-  tierBadgeLabel: {
-    ...Typography.heading,
-    fontSize: 20,
-    letterSpacing: 3,
-  },
-  tierSubLabel: {
-    ...Typography.tiny,
-    letterSpacing: 2,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  probSub: {
-    ...Typography.tiny,
-    color: Colors.greenDim,
-    marginTop: 4,
-    letterSpacing: 1,
-    textAlign: 'center',
-  },
+  tierBadgeLabel: { ...Typography.heading, fontSize: 20, letterSpacing: 3 },
+  tierSubLabel:   { ...Typography.tiny, letterSpacing: 2, marginBottom: 10, textAlign: 'center' },
+  probSub:        { ...Typography.tiny, color: Colors.greenDim, marginTop: 4, letterSpacing: 1, textAlign: 'center' },
 
-  // Input card
   inputCard: {
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-    padding: 10,
-    marginBottom: 12,
+    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, padding: 10, marginBottom: 12,
   },
-  inputLabel: {
-    ...Typography.labelSmall,
-    color: Colors.greenDim,
-    marginBottom: 6,
-  },
+  inputLabel: { ...Typography.labelSmall, color: Colors.greenDim, marginBottom: 6 },
   input: {
-    backgroundColor: Colors.black,
-    borderWidth: 1,
-    borderColor: Colors.borderDim,
-    color: Colors.green,
-    fontFamily: 'ShareTechMono-Regular',
-    fontSize: 13,
-    padding: 8,
-    letterSpacing: 1,
+    backgroundColor: Colors.black, borderWidth: 1, borderColor: Colors.borderDim,
+    color: Colors.green, fontFamily: Fonts.mono, fontSize: 15,
+    padding: 8, letterSpacing: 1,
   },
-  inputHint: {
-    ...Typography.micro,
-    color: Colors.greenDim,
-    marginTop: 5,
-    letterSpacing: 0.5,
-  },
+  inputHint: { ...Typography.micro, color: Colors.greenDim, marginTop: 5, letterSpacing: 0.5 },
 
-  // Section header
   sectionHeader: {
-    ...Typography.labelSmall,
-    color: Colors.greenDim,
-    marginBottom: 6,
-    paddingBottom: 3,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    ...Typography.labelSmall, color: Colors.greenDim,
+    marginBottom: 6, paddingBottom: 3,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
 
-  // Stat rows
   statRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 8,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-    marginBottom: 3,
+    flexDirection: 'row', justifyContent: 'space-between',
+    padding: 8, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, marginBottom: 3,
   },
-  statLabel: {
-    ...Typography.tiny,
-    color: Colors.greenDim,
-    letterSpacing: 1,
-  },
-  statValue: {
-    ...Typography.subheading,
-    color: Colors.green,
-  },
+  statLabel: { ...Typography.tiny, color: Colors.greenDim, letterSpacing: 1 },
+  statValue: { ...Typography.subheading, color: Colors.green },
 
-  // Formula card
   formulaCard: {
-    marginTop: 10,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    marginTop: 10, padding: 10,
+    borderWidth: 1, borderColor: Colors.border,
     backgroundColor: Colors.surface,
   },
-  formulaText: {
-    ...Typography.micro,
-    color: Colors.greenDim,
-    lineHeight: 16,
-    letterSpacing: 0.5,
-  },
+  formulaText: { ...Typography.micro, color: Colors.greenDim, lineHeight: 18, letterSpacing: 0.5 },
 
-  // Luck rows
   luckRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 10,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
-    marginBottom: 4,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    padding: 10, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, marginBottom: 4,
   },
-  luckLeft: {
-    flex: 1,
-    marginRight: 8,
-  },
-  luckLabel: {
-    ...Typography.small,
-    letterSpacing: 2,
-    marginBottom: 2,
-  },
-  luckSubLabel: {
-    ...Typography.micro,
-    letterSpacing: 1,
-  },
-  luckRange: {
-    ...Typography.tiny,
-    textAlign: 'right',
-    letterSpacing: 0.5,
-  },
+  luckLeft:     { flex: 1, marginRight: 8 },
+  luckLabel:    { ...Typography.small, letterSpacing: 2, marginBottom: 2 },
+  luckSubLabel: { ...Typography.micro, letterSpacing: 1 },
+  luckRange:    { ...Typography.tiny, textAlign: 'right', letterSpacing: 0.5 },
 });

@@ -10,6 +10,7 @@ import {
 import TierName from '../components/TierName';
 import { getBlockCount, getBlockHash, getBlock } from '../services/rpc';
 import Colors from '../theme/colors';
+import { Fonts } from '../theme/typography';
 import { getAddressType } from '../utils/wasteland';
 
 const PAGE_SIZE = 10;
@@ -26,7 +27,6 @@ export default function ExplorerScreen({ nodeConfig }) {
   const [searchError,  setSearchError]  = useState(null);
   const [hasMore,      setHasMore]      = useState(true);
 
-  // Use a ref for nextHeight so onEndReached always sees the latest value
   const nextHeightRef  = useRef(null);
   const loadingMoreRef = useRef(false);
 
@@ -65,20 +65,19 @@ export default function ExplorerScreen({ nodeConfig }) {
       setSearchError(null);
       setExpanded(null);
     } catch (e) {
-      console.warn('ExplorerScreen loadBlocks error:', e);
+      // silently handle — connection may not be ready yet
     }
   }, [nodeConfig, fetchBlocks]);
 
   useEffect(() => { loadBlocks(); }, [loadBlocks]);
 
-  // ── Pull-to-refresh ──
   const onRefresh = async () => {
     setRefreshing(true);
     await loadBlocks();
     setRefreshing(false);
   };
 
-  // ── Infinite scroll — fired by FlatList onEndReached ──
+  // ── Infinite scroll ──
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current || !hasMore || searchResult) return;
     loadingMoreRef.current = true;
@@ -91,7 +90,7 @@ export default function ExplorerScreen({ nodeConfig }) {
       nextHeightRef.current = newNext;
       setHasMore(newNext > 0);
     } catch (e) {
-      console.warn('loadMore error:', e);
+      // silently handle
     }
     loadingMoreRef.current = false;
     setLoadingMore(false);
@@ -154,7 +153,7 @@ export default function ExplorerScreen({ nodeConfig }) {
     str && str.length > len ? str.slice(0, len) + '...' : str;
 
   // ── Block card renderer ──
-  const renderBlock = ({ item: block, index }) => {
+  const renderBlock = ({ item: block }) => {
     const isExpanded = expanded === block.hash;
     return (
       <TouchableOpacity
@@ -195,10 +194,9 @@ export default function ExplorerScreen({ nodeConfig }) {
     );
   };
 
-  // ── List header (static — rendered once above the block list) ──
+  // ── List header ──
   const ListHeader = (
     <View>
-      {/* B.D.T. Header */}
       <View style={styles.headerRow}>
         <Text style={styles.headerTitle}>B.D.T.</Text>
         <Text style={styles.headerSub}>BROTHERHOOD DATA TERMINAL</Text>
@@ -207,7 +205,6 @@ export default function ExplorerScreen({ nodeConfig }) {
         )}
       </View>
 
-      {/* Search */}
       <View style={styles.searchRow}>
         <View style={styles.searchBar}>
           <Text style={styles.searchIcon}>🔍</Text>
@@ -234,23 +231,20 @@ export default function ExplorerScreen({ nodeConfig }) {
         </TouchableOpacity>
       </View>
 
-      {/* Search error */}
       {searchError && (
         <Text style={styles.searchError}>{searchError}</Text>
       )}
 
-      {/* Search result */}
       {searchResult && (
         <>
           <Text style={styles.sectionHeader}>▸ SEARCH RESULT</Text>
-          {renderBlock({ item: searchResult, index: 0 })}
+          {renderBlock({ item: searchResult })}
           <TouchableOpacity style={styles.clearSearchBtn} onPress={clearSearch}>
             <Text style={styles.clearSearchBtnText}>✕ CLEAR SEARCH</Text>
           </TouchableOpacity>
         </>
       )}
 
-      {/* Codex section label */}
       <Text style={styles.sectionHeader}>
         ▸ CODEX{blocks.length > 0
           ? ` (#${blocks[blocks.length - 1]?.height} — #${blocks[0]?.height})`
@@ -314,29 +308,27 @@ const styles = StyleSheet.create({
   container:        { flex: 1, backgroundColor: Colors.black },
   contentContainer: { padding: 14 },
 
-  // ── B.D.T. Header ──
   headerRow: {
     borderWidth: 1, borderColor: Colors.border,
     backgroundColor: Colors.surface,
     padding: 12, marginBottom: 14, alignItems: 'center',
   },
   headerTitle: {
-    fontFamily: 'VT323-Regular', fontSize: 38,
+    fontFamily: Fonts.display, fontSize: 38,
     color: Colors.green, letterSpacing: 6,
     textShadowColor: Colors.green,
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 8,
   },
   headerSub: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 10,
+    fontFamily: Fonts.mono, fontSize: 12,
     color: Colors.greenDim, letterSpacing: 3, marginTop: 2,
   },
   headerHeight: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 11,
+    fontFamily: Fonts.mono, fontSize: 14,
     color: Colors.green, letterSpacing: 2, marginTop: 6,
   },
 
-  // ── Search ──
   searchRow: { flexDirection: 'row', marginBottom: 12, gap: 8 },
   searchBar: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
@@ -346,21 +338,21 @@ const styles = StyleSheet.create({
   searchIcon:  { fontSize: 16, marginRight: 6 },
   searchInput: {
     flex: 1, color: Colors.green,
-    fontFamily: 'ShareTechMono-Regular', fontSize: 12,
+    fontFamily: Fonts.mono, fontSize: 14,
     padding: 10, letterSpacing: 1,
   },
   clearBtn:    { fontSize: 14, color: Colors.greenDim, padding: 4 },
   searchBtn: {
     borderWidth: 1, borderColor: Colors.green,
-    backgroundColor: 'rgba(0,255,70,0.05)',
+    backgroundColor: 'rgba(118,255,122,0.05)',
     paddingHorizontal: 14, justifyContent: 'center', alignItems: 'center',
   },
   searchBtnText: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 12,
+    fontFamily: Fonts.mono, fontSize: 14,
     color: Colors.green, letterSpacing: 1,
   },
   searchError: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 11,
+    fontFamily: Fonts.mono, fontSize: 13,
     color: Colors.red, textAlign: 'center',
     marginBottom: 8, letterSpacing: 1,
   },
@@ -369,18 +361,16 @@ const styles = StyleSheet.create({
     padding: 8, alignItems: 'center', marginBottom: 10,
   },
   clearSearchBtnText: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 11,
+    fontFamily: Fonts.mono, fontSize: 13,
     color: Colors.greenDim, letterSpacing: 1,
   },
-
   sectionHeader: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 11,
+    fontFamily: Fonts.mono, fontSize: 13,
     color: Colors.greenDim, letterSpacing: 2,
     marginBottom: 8, paddingBottom: 4,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
 
-  // ── Block cards ──
   blockCard: {
     backgroundColor: Colors.surface, borderWidth: 1,
     borderColor: Colors.border, borderLeftWidth: 3,
@@ -392,57 +382,56 @@ const styles = StyleSheet.create({
   },
   blockTop:    { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
   blockHeight: {
-    fontFamily: 'VT323-Regular', fontSize: 26, color: Colors.green,
+    fontFamily: Fonts.display, fontSize: 26, color: Colors.green,
     textShadowColor: Colors.green,
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 6,
   },
-  blockTime:    { fontFamily: 'ShareTechMono-Regular', fontSize: 10, color: Colors.greenDim, alignSelf: 'flex-end' },
+  blockTime:    { fontFamily: Fonts.mono, fontSize: 12, color: Colors.greenDim, alignSelf: 'flex-end' },
   minerRow:     { flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: 4 },
   minerIcon:    { fontSize: 13, color: Colors.greenDim },
   minerAddress: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 10,
+    fontFamily: Fonts.mono, fontSize: 12,
     color: Colors.greenDim, marginBottom: 2, letterSpacing: 0.5,
   },
   metaRow:  { flexDirection: 'row', gap: 12 },
   metaItem: { flexDirection: 'row' },
-  metaLabel: { fontFamily: 'ShareTechMono-Regular', fontSize: 10, color: Colors.greenDim },
-  metaValue: { fontFamily: 'ShareTechMono-Regular', fontSize: 10, color: Colors.green },
+  metaLabel: { fontFamily: Fonts.mono, fontSize: 12, color: Colors.greenDim },
+  metaValue: { fontFamily: Fonts.mono, fontSize: 12, color: Colors.green },
   expandedSection: {
     marginTop: 8, paddingTop: 6,
     borderTopWidth: 1, borderTopColor: Colors.border,
   },
   expandedLabel: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 10,
+    fontFamily: Fonts.mono, fontSize: 12,
     color: Colors.greenDim, marginBottom: 3,
   },
   expandedHash: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 10,
-    color: Colors.green, letterSpacing: 0.5, lineHeight: 16,
+    fontFamily: Fonts.mono, fontSize: 12,
+    color: Colors.green, letterSpacing: 0.5, lineHeight: 18,
   },
   addressBadge: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 10,
+    fontFamily: Fonts.mono, fontSize: 12,
     paddingHorizontal: 4, paddingVertical: 1, borderWidth: 1,
   },
   bech32Badge: { color: Colors.green,  borderColor: Colors.green },
   legacyBadge: { color: Colors.amber, borderColor: Colors.amber },
 
-  // ── Footer ──
   footerLoader: {
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'center', paddingVertical: 14, gap: 8,
   },
   footerLoaderText: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 11,
+    fontFamily: Fonts.mono, fontSize: 13,
     color: Colors.greenDim, letterSpacing: 2,
   },
   genesisText: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 11,
+    fontFamily: Fonts.mono, fontSize: 13,
     color: Colors.greenDim, textAlign: 'center',
     marginVertical: 12, letterSpacing: 2,
   },
   emptyText: {
-    fontFamily: 'ShareTechMono-Regular', fontSize: 12,
+    fontFamily: Fonts.mono, fontSize: 14,
     color: Colors.greenDim, textAlign: 'center', marginTop: 20,
   },
 });

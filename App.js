@@ -15,7 +15,7 @@ import NetworkScreen  from './screens/NetworkScreen';
 import SoloScreen     from './screens/SoloScreen';
 import FieldManual    from './components/FieldManual';
 import SetupMenu      from './components/Setupmenu';
-import { getBlockCount, getMiningInfo, loadAppMode } from './services/rpc';
+import { getBlockCount, getMiningInfo, loadAppMode, loadNodeConfig } from './services/rpc';
 import Colors    from './theme/colors';
 import Typography from './theme/typography';
 
@@ -35,24 +35,34 @@ export default function App() {
   const [isOnline,    setIsOnline]    = useState(true);
   const [showManual,  setShowManual]  = useState(false);
   const [showSetup,   setShowSetup]   = useState(false);
-  const [nodeConfig,  setNodeConfig]  = useState(DEFAULT_NODE);
+  const [nodeConfig,  setNodeConfig]  = useState(null);
   const [appMode,     setAppMode]     = useState('DRIFTER');
+  const [configReady, setConfigReady] = useState(false);
 
   const tickerAnim = useRef(new Animated.Value(0)).current;
 
   // ── Load persisted app mode on boot ───────────────────────
   useEffect(() => {
-  loadAppMode().then(m => {
-    if (!m) return;
-    // Map legacy mode strings to display names
-    if (m === 'connected'   || m === 'DRIFTER')  { setAppMode('DRIFTER');  return; }
-    if (m === 'standalone'  || m === 'WANDERER') { setAppMode('WANDERER'); return; }
-    setAppMode('DRIFTER'); // safe fallback
-  });
-}, []);
+    loadAppMode().then(m => {
+      if (!m) return;
+      if (m === 'connected'  || m === 'DRIFTER')  { setAppMode('DRIFTER');  return; }
+      if (m === 'standalone' || m === 'WANDERER') { setAppMode('WANDERER'); return; }
+      setAppMode('DRIFTER');
+    });
+  }, []);
+
+  // ── Load persisted node config on boot ────────────────────
+  useEffect(() => {
+    loadNodeConfig().then(cfg => {
+      if (cfg) setNodeConfig(cfg);
+      else setNodeConfig(DEFAULT_NODE);
+      setConfigReady(true);
+    });
+  }, []);
 
   // ── Poll node stats ────────────────────────────────────────
   useEffect(() => {
+    if (!configReady || !nodeConfig) return;
     const poll = async () => {
       try {
         const [h, mining] = await Promise.all([
@@ -70,7 +80,7 @@ export default function App() {
     poll();
     const id = setInterval(poll, 30000);
     return () => clearInterval(id);
-  }, [nodeConfig]);
+  }, [nodeConfig, configReady]);
 
   // ── Formatters ─────────────────────────────────────────────
   const formatHash = (hs) => {
@@ -160,49 +170,55 @@ export default function App() {
           </View>
 
           {/* ── Tab Navigation ── */}
-          <Tab.Navigator
-            screenOptions={({ route }) => ({
-              headerShown:             false,
-              tabBarStyle:             styles.tabBar,
-              tabBarActiveTintColor:   Colors.green,
-              tabBarInactiveTintColor: Colors.greenDim,
-              tabBarLabelStyle:        styles.tabLabel,
-              tabBarIcon: ({ focused }) => {
-                const icons = {
-                  VAULT:    '⬡',
-                  'P.B.G.': '⚒',
-                  'B.D.T.': '⛓',
-                  SIGNAL:   '∿',
-                  SURVIVOR: '↯',
-                };
-                return (
-                  <Text style={{
-                    fontSize: focused ? 32 : 22,
-                    color:    focused ? Colors.green : Colors.greenDim,
-                    opacity:  focused ? 1 : 0.6,
-                  }}>
-                    {icons[route.name]}
-                  </Text>
-                );
-              },
-            })}
-          >
-            <Tab.Screen name="VAULT">
-              {() => <WalletScreen nodeConfig={nodeConfig} isOnline={isOnline} />}
-            </Tab.Screen>
-            <Tab.Screen name="P.B.G.">
-              {() => <MinerScreen nodeConfig={nodeConfig} isOnline={isOnline} />}
-            </Tab.Screen>
-            <Tab.Screen name="B.D.T.">
-              {() => <ExplorerScreen nodeConfig={nodeConfig} />}
-            </Tab.Screen>
-            <Tab.Screen name="SIGNAL">
-              {() => <NetworkScreen nodeConfig={nodeConfig} />}
-            </Tab.Screen>
-            <Tab.Screen name="SURVIVOR">
-              {() => <SoloScreen nodeConfig={nodeConfig} />}
-            </Tab.Screen>
-          </Tab.Navigator>
+          {!configReady ? (
+            <View style={styles.initContainer}>
+              <Text style={styles.initText}>INITIALIZING...</Text>
+            </View>
+          ) : (
+            <Tab.Navigator
+              screenOptions={({ route }) => ({
+                headerShown:             false,
+                tabBarStyle:             styles.tabBar,
+                tabBarActiveTintColor:   Colors.green,
+                tabBarInactiveTintColor: Colors.greenDim,
+                tabBarLabelStyle:        styles.tabLabel,
+                tabBarIcon: ({ focused }) => {
+                  const icons = {
+                    VAULT:    '⬡',
+                    'P.B.G.': '⚒',
+                    'B.D.T.': '⛓',
+                    SIGNAL:   '∿',
+                    SURVIVOR: '↯',
+                  };
+                  return (
+                    <Text style={{
+                      fontSize: focused ? 32 : 22,
+                      color:    focused ? Colors.green : Colors.greenDim,
+                      opacity:  focused ? 1 : 0.6,
+                    }}>
+                      {icons[route.name]}
+                    </Text>
+                  );
+                },
+              })}
+            >
+              <Tab.Screen name="VAULT">
+                {() => <WalletScreen nodeConfig={nodeConfig} isOnline={isOnline} />}
+              </Tab.Screen>
+              <Tab.Screen name="P.B.G.">
+                {() => <MinerScreen nodeConfig={nodeConfig} isOnline={isOnline} />}
+              </Tab.Screen>
+              <Tab.Screen name="B.D.T.">
+                {() => <ExplorerScreen nodeConfig={nodeConfig} />}
+              </Tab.Screen>
+              <Tab.Screen name="SIGNAL">
+                {() => <NetworkScreen nodeConfig={nodeConfig} />}
+              </Tab.Screen>
+              <Tab.Screen name="SURVIVOR">
+                {() => <SoloScreen nodeConfig={nodeConfig} />}
+              </Tab.Screen>
+            </Tab.Navigator>
+          )}
 
         </SafeAreaView>
 
@@ -228,6 +244,20 @@ const styles = StyleSheet.create({
   container: {
     flex:            1,
     backgroundColor: Colors.black,
+  },
+
+  // ── Init screen ─────────────────────────────────────────────
+  initContainer: {
+    flex:            1,
+    justifyContent:  'center',
+    alignItems:      'center',
+    backgroundColor: Colors.black,
+  },
+  initText: {
+    fontFamily:    'ShareTechMono',
+    fontSize:      14,
+    color:         Colors.green,
+    letterSpacing: 3,
   },
 
   // ── Header ──────────────────────────────────────────────────
@@ -271,7 +301,7 @@ const styles = StyleSheet.create({
     gap:           6,
   },
   statusIcon: {
-    fontSize:  20,
+    fontSize: 20,
   },
   modeText: {
     fontFamily:       'ShareTechMono',

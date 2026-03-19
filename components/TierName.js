@@ -7,11 +7,12 @@ import { Text, Animated, StyleSheet } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { generateWastelandName, getTierStyle } from '../utils/wasteland';
-import Typography from '../theme/typography';
+import { Typography } from '../theme/typography';
+import Colors from '../theme/colors';
 
 export default function TierName({
   address,
-  size = 'amount',     // key from Typography
+  size = 'amount',
   showVerified = false,
   showAlias = false,
   alias = '',
@@ -20,7 +21,6 @@ export default function TierName({
   const { fullName, tier, verified } = generateWastelandName(address);
   const tierStyle = getTierStyle(tier);
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const shimmerAnim = useRef(new Animated.Value(0)).current;
 
   // Pulse glow for rare and legendary tiers
   useEffect(() => {
@@ -30,15 +30,6 @@ export default function TierName({
           Animated.timing(pulseAnim, { toValue: 1.4, duration: 1000, useNativeDriver: false }),
           Animated.timing(pulseAnim, { toValue: 1.0, duration: 1000, useNativeDriver: false }),
         ])
-      ).start();
-    }
-  }, [tier]);
-
-  // Shimmer animation for mythic tier
-  useEffect(() => {
-    if (tier === 'mythic') {
-      Animated.loop(
-        Animated.timing(shimmerAnim, { toValue: 1, duration: 3000, useNativeDriver: false })
       ).start();
     }
   }, [tier]);
@@ -55,7 +46,7 @@ export default function TierName({
         <Text style={[...baseStyle, styles.mythicMask]}>{fullName}</Text>
       }>
         <LinearGradient
-          colors={['#ff69b4', '#b44fff', '#ff69b4']}
+          colors={[Colors.tiers.mythic.colorA, Colors.tiers.mythic.colorB, Colors.tiers.mythic.colorA]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
         >
@@ -71,8 +62,8 @@ export default function TierName({
       <Animated.Text style={[
         ...baseStyle,
         {
-          color: tierStyle.color,
-          textShadowColor: tierStyle.color,
+          color:            tierStyle.color,
+          textShadowColor:  tierStyle.color,
           textShadowOffset: { width: 0, height: 0 },
           textShadowRadius: pulseAnim,
         },
@@ -89,8 +80,8 @@ export default function TierName({
     <Text style={[
       ...baseStyle,
       {
-        color: tierStyle.color,
-        textShadowColor: tierStyle.color,
+        color:            tierStyle.color,
+        textShadowColor:  tierStyle.color,
         textShadowOffset: { width: 0, height: 0 },
         textShadowRadius: 6,
       },
@@ -104,16 +95,16 @@ export default function TierName({
 
 const styles = StyleSheet.create({
   mythicMask: {
-    color: 'black',
+    color:           'black',
     backgroundColor: 'transparent',
   },
   verified: {
-    fontSize: 10,
-    color: '#1a7a06',
+    fontSize: 12,
+    color:    Colors.greenDim,
   },
   alias: {
-    fontSize: 9,
-    color: '#ffb000',
+    fontSize:      11,
+    color:         Colors.amber,
     letterSpacing: 1,
   },
 });
