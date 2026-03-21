@@ -1,32 +1,30 @@
 // components/SetupMenu.js
 // CapStash — Node Configuration Modal
 //
-// User enters: IP Address, Port, Username, Password (separately)
-// On save: stored in encrypted storage via rpc.saveNodeConfig()
-// Format saved: { ip: '100.x.x.x', port: '8332', rpcuser, rpcpassword }
-// buildRpcUrl() in rpc.js combines them at call time → http://ip:port/
-//
 // Props:
 //   visible            {bool}
 //   onClose            {fn}
 //   isOnline           {bool}
 //   nodeConfig         {object}  — current config from App.js state
-//   appMode            {string}  — 'DRIFTER' | 'WANDERER' from App.js state
+//   appMode            {string}  — 'drifter' | 'wanderer' from App.js state
 //   onNodeConfigChange {fn}      — App.js setNodeConfig
+//   onModeChange       {fn}      — App.js handleModeSelected
+
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, Modal, ScrollView, TouchableOpacity,
-  TextInput, StyleSheet, ActivityIndicator,
+  TextInput, StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import {
   saveNodeConfig,
   loadNodeConfig,
   testConnection,
 } from '../services/rpc';
+import { MODE_DRIFTER, MODE_WANDERER } from '../services/appMode';
 import Colors    from '../theme/colors';
 import Typography from '../theme/typography';
 
-const APP_VERSION = '2.0.0-CAPSTASH';
+const APP_VERSION = '4.20.69';
 
 export default function SetupMenu({
   visible,
@@ -35,22 +33,26 @@ export default function SetupMenu({
   nodeConfig,
   appMode,
   onNodeConfigChange,
+  onModeChange,
 }) {
   const [activeSection, setActiveSection] = useState('node');
 
   // ── Four clean fields ──────────────────────────────────
-  const [ip,       setIp]      = useState('');
-  const [port,     setPort]    = useState('8332');
-  const [username, setUsername]= useState('');
-  const [password, setPassword]= useState('');
-  const [showIp,   setShowIp]  = useState(false);
-  const [showPort, setShowPort]= useState(false);
-  const [showPass, setShowPass]= useState(false);
+  const [ip,       setIp]       = useState('');
+  const [port,     setPort]     = useState('8332');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showIp,   setShowIp]   = useState(false);
+  const [showPort, setShowPort] = useState(false);
+  const [showPass, setShowPass] = useState(false);
 
   // ── Status ─────────────────────────────────────────────
   const [testStatus,  setTestStatus]  = useState(null);
   const [testMessage, setTestMessage] = useState('');
   const [saveStatus,  setSaveStatus]  = useState(null);
+
+  // ── Node config output (Wanderer) ──────────────────────
+  const [confOutput, setConfOutput] = useState('');
 
   // ── Load existing config when menu opens ───────────────
   useEffect(() => {
@@ -60,8 +62,8 @@ export default function SetupMenu({
       if (cfg) {
         if (cfg.ip?.includes(':')) {
           const [rawIp, rawPort] = cfg.ip.split(':');
-          setIp(rawIp    || '');
-          setPort(rawPort || '8332');
+          setIp(rawIp     || '');
+          setPort(rawPort  || '8332');
         } else {
           setIp(cfg.ip    || '');
           setPort(cfg.port || '8332');
@@ -73,12 +75,13 @@ export default function SetupMenu({
     setTestStatus(null);
     setTestMessage('');
     setSaveStatus(null);
+    setConfOutput('');
   }, [visible]);
 
-  const statusColor = isOnline ? Colors.green : Colors.red;
-  const currentMode = appMode || 'DRIFTER';
+  const statusColor  = isOnline ? Colors.green : Colors.red;
+  const currentMode  = (appMode || MODE_DRIFTER).toLowerCase();
+  const isWanderer   = currentMode === 'wanderer';
 
-  // ── Build config object from current fields ────────────
   const buildConfig = () => ({
     ip:          ip.trim(),
     port:        port.trim() || '8332',
@@ -88,7 +91,7 @@ export default function SetupMenu({
 
   const fieldsComplete = ip.trim() && port.trim() && username.trim() && password.trim();
 
-  // ── Test (does NOT save) ───────────────────────────────
+  // ── Test connection ────────────────────────────────────
   const handleTest = async () => {
     if (!fieldsComplete) {
       setTestStatus('fail');
@@ -115,12 +118,9 @@ export default function SetupMenu({
     }
   };
 
-  // ── Save to encrypted storage + update App.js state ───
+  // ── Save config ────────────────────────────────────────
   const handleSave = async () => {
-    if (!fieldsComplete) {
-      setSaveStatus('error');
-      return;
-    }
+    if (!fieldsComplete) { setSaveStatus('error'); return; }
     setSaveStatus('saving');
     try {
       const saved = await saveNodeConfig(buildConfig());
@@ -131,6 +131,54 @@ export default function SetupMenu({
       console.warn('[SetupMenu] Save error:', e.message);
       setSaveStatus('error');
     }
+  };
+
+  // ── Write node config file (Wanderer) ──────────────────
+  const handleWriteConfig = async () => {
+    try {
+      const { initWandererNode } = require('../services/nodeManager');
+      const ok = await initWandererNode();
+      setConfOutput(ok
+        ? '✓ CONFIG WRITTEN SUCCESSFULLY\n\nFile saved to:\n/data/user/0/com.capstashwallet\n/files/capstash/capstash.conf'
+        : '✕ CONFIG WRITE FAILED\nCheck device storage permissions');
+    } catch (e) {
+      setConfOutput('✕ ERROR: ' + e.message);
+    }
+  };
+
+  // ── View node config file (Wanderer) ──────────────────
+  const handleViewConfig = async () => {
+    try {
+      const RNFS = require('react-native-fs');
+      const path = '/data/user/0/com.capstashwallet/files/capstash/capstash.conf';
+      const exists = await RNFS.exists(path);
+      if (!exists) {
+        setConfOutput('NO CONFIG FILE FOUND\nTap WRITE CONFIG first');
+        return;
+      }
+      const content = await RNFS.readFile(path, 'utf8');
+      setConfOutput(content);
+    } catch (e) {
+      setConfOutput('READ FAILED: ' + e.message);
+    }
+  };
+
+  // ── Switch mode ────────────────────────────────────────
+  const handleSwitchMode = () => {
+    const targetMode = isWanderer ? MODE_DRIFTER : MODE_WANDERER;
+    const targetName = isWanderer ? 'DRIFTER' : 'WANDERER';
+    Alert.alert(
+      `SWITCH TO ${targetName}`,
+      isWanderer
+        ? 'Switching to Drifter mode will disconnect from the local node. Local chain data will be preserved.'
+        : 'Switching to Wanderer mode will run a full node on this device. First sync may take several minutes.',
+      [
+        { text: 'CANCEL', style: 'cancel' },
+        { text: `ENTER ${targetName}`,
+          onPress: () => { onModeChange?.(targetMode); onClose(); }
+        },
+      ]
+    );
   };
 
   const resetTestState = () => {
@@ -151,7 +199,7 @@ export default function SetupMenu({
     >
       <View style={styles.root}>
 
-        {/* ── Header ─────────────────────────────────── */}
+        {/* ── Header ── */}
         <View style={styles.header}>
           <View>
             <Text style={styles.headerTitle}>SETUP</Text>
@@ -168,29 +216,34 @@ export default function SetupMenu({
           showsVerticalScrollIndicator={false}
         >
 
-          {/* ── Mode Banner ────────────────────────────── */}
+          {/* ── Mode Banner ── */}
           <View style={[styles.modeBanner, { borderColor: statusColor }]}>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.modeTag}>ACTIVE MODE</Text>
               <Text style={[styles.modeName, { color: statusColor, textShadowColor: statusColor }]}>
-                {currentMode}
+                {currentMode.toUpperCase()}
               </Text>
               <Text style={styles.modeDesc}>
-  {currentMode === 'wanderer' || currentMode === 'WANDERER'
-    ? 'SELF-CONTAINED · LOCAL NODE · NO TAILSCALE'
-    : 'REMOTE NODE · SYNCS VIA TAILSCALE OR LOCAL IP'}
-</Text>
+                {isWanderer
+                  ? 'SELF-CONTAINED · LOCAL NODE · NO TAILSCALE'
+                  : 'REMOTE NODE · SYNCS VIA TAILSCALE OR LOCAL IP'}
+              </Text>
             </View>
-            <View style={styles.modeStatus}>
+            <View style={styles.modeStatusBlock}>
               <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
               <Text style={[styles.statusLabel, { color: statusColor }]}>
                 {isOnline ? 'ONLINE' : 'OFFLINE'}
               </Text>
+              <TouchableOpacity style={styles.switchModeBtn} onPress={handleSwitchMode}>
+                <Text style={styles.switchModeBtnText}>
+                  {isWanderer ? '→ DRIFTER' : '→ WANDERER'}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
 
-         {/* Wanderer node status — only shown in Wanderer mode */}
-          {(currentMode === 'wanderer' || currentMode === 'WANDERER') && (
+          {/* ── Wanderer Node Section ── */}
+          {isWanderer && (
             <View style={styles.wandererCard}>
               <Text style={styles.wandererTitle}>◈ LOCAL NODE STATUS</Text>
               <Text style={styles.wandererDesc}>
@@ -198,14 +251,44 @@ export default function SetupMenu({
                   ? 'NODE RUNNING · CHAIN SYNCING'
                   : 'NODE NOT STARTED · AWAITING CAPSTASHD'}
               </Text>
+
+              <View style={styles.confDivider} />
+
+              <Text style={styles.wandererTitle}>◈ NODE CONFIG</Text>
+
+              <View style={styles.confRow}>
+                <Text style={styles.confLabel}>DATA DIR</Text>
+                <Text style={styles.confValue} numberOfLines={1}>
+                  .../com.capstashwallet/files/capstash
+                </Text>
+              </View>
+              <View style={styles.confRow}>
+                <Text style={styles.confLabel}>RPC PORT</Text>
+                <Text style={styles.confValue}>8332</Text>
+              </View>
+              <View style={styles.confRow}>
+                <Text style={styles.confLabel}>PEER</Text>
+                <Text style={styles.confValue}>bitcoinii.ddns.net:9999</Text>
+              </View>
+
+              <View style={styles.confButtonRow}>
+                <TouchableOpacity style={styles.confBtn} onPress={handleWriteConfig}>
+                  <Text style={styles.confBtnText}>WRITE CONFIG</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.confBtn} onPress={handleViewConfig}>
+                  <Text style={styles.confBtnText}>VIEW CONFIG</Text>
+                </TouchableOpacity>
+              </View>
+
+              {confOutput ? (
+                <Text style={styles.confOutput} selectable>{confOutput}</Text>
+              ) : null}
             </View>
           )}
 
           <View style={styles.divider} />
 
-          {/* ════════════════════════════════════════════
-              SECTION: NODE CONNECTION
-          ════════════════════════════════════════════ */}
+          {/* ── Node Connection Section ── */}
           <SectionHeader
             label="▸ NODE CONNECTION"
             open={activeSection === 'node'}
@@ -214,176 +297,179 @@ export default function SetupMenu({
           {activeSection === 'node' && (
             <View style={styles.sectionBody}>
 
-              {/* Tailscale how-to */}
+              {/* How-to — show Tailscale for Drifter, localhost note for Wanderer */}
               <View style={styles.howToBox}>
-                <Text style={styles.howToTitle}>▸ TAILSCALE QUICK SETUP</Text>
-                <Text style={styles.howToText}>
-                  {'1. '}INSTALL TAILSCALE ON YOUR PHONE + NODE PC{'\n'}
-                  {'2. '}SIGN IN TO BOTH WITH THE SAME ACCOUNT{'\n'}
-                  {'3. '}ON THE NODE PC, RUN:{'\n'}
-                  {'     '}tailscale ip -4{'\n'}
-                  {'     '}→ YOU'LL GET A 100.x.x.x ADDRESS{'\n'}
-                  {'4. '}ADD TO YOUR CapStash.conf:{'\n'}
-                  {'     '}server=1{'\n'}
-                  {'     '}rpcbind=0.0.0.0{'\n'}
-                  {'     '}rpcallowip=100.64.0.0/10{'\n'}
-                  {'     '}rpcport=8332{'\n'}
-                  {'5. '}RESTART YOUR QT NODE{'\n'}
-                  {'6. '}ENTER THE 100.x.x.x ADDRESS BELOW + 8332 AS PORT{'\n'}
-                </Text>
-              </View>
-
-              {/* ── IP Address ── */}
-              <Text style={styles.fieldLabel}>IP ADDRESS</Text>
-              <Text style={styles.fieldHint}>Your node's Tailscale IP — e.g. 100.64.0.1</Text>
-              <View style={styles.passwordRow}>
-                <TextInput
-                  style={[styles.input, styles.passwordInput]}
-                  value={ip}
-                  onChangeText={t => { setIp(t); resetTestState(); }}
-                  placeholder="100.x.x.x"
-                  placeholderTextColor={Colors.greenDim}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="decimal-pad"
-                  secureTextEntry={!showIp}
-                />
-                <TouchableOpacity
-                  style={styles.togglePassBtn}
-                  onPress={() => setShowIp(p => !p)}
-                >
-                  <Text style={styles.togglePassText}>{showIp ? 'HIDE' : 'SHOW'}</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* ── Port ── */}
-              <Text style={[styles.fieldLabel, styles.fieldSpacing]}>PORT</Text>
-              <Text style={styles.fieldHint}>Default is 8332 — only change if you customised rpcport</Text>
-              <View style={styles.passwordRow}>
-                <TextInput
-                  style={[styles.input, styles.passwordInput]}
-                  value={port}
-                  onChangeText={t => { setPort(t); resetTestState(); }}
-                  placeholder="8332"
-                  placeholderTextColor={Colors.greenDim}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="number-pad"
-                  secureTextEntry={!showPort}
-                />
-                <TouchableOpacity
-                  style={styles.togglePassBtn}
-                  onPress={() => setShowPort(p => !p)}
-                >
-                  <Text style={styles.togglePassText}>{showPort ? 'HIDE' : 'SHOW'}</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* ── Username ── */}
-              <Text style={[styles.fieldLabel, styles.fieldSpacing]}>USERNAME</Text>
-              <Text style={styles.fieldHint}>Matches rpcuser in your CapStash.conf</Text>
-              <TextInput
-                style={styles.input}
-                value={username}
-                onChangeText={t => { setUsername(t); resetTestState(); }}
-                placeholder="rpcuser"
-                placeholderTextColor={Colors.greenDim}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-
-              {/* ── Password ── */}
-              <Text style={[styles.fieldLabel, styles.fieldSpacing]}>PASSWORD</Text>
-              <Text style={styles.fieldHint}>Matches rpcpassword in your CapStash.conf</Text>
-              <View style={styles.passwordRow}>
-                <TextInput
-                  style={[styles.input, styles.passwordInput]}
-                  value={password}
-                  onChangeText={t => { setPassword(t); resetTestState(); }}
-                  placeholder="rpcpassword"
-                  placeholderTextColor={Colors.greenDim}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  secureTextEntry={!showPass}
-                />
-                <TouchableOpacity
-                  style={styles.togglePassBtn}
-                  onPress={() => setShowPass(p => !p)}
-                >
-                  <Text style={styles.togglePassText}>{showPass ? 'HIDE' : 'SHOW'}</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* ── Test button ── */}
-              <TouchableOpacity
-                style={[
-                  styles.testBtn,
-                  testStatus === 'ok'   && styles.testBtnOk,
-                  testStatus === 'fail' && styles.testBtnFail,
-                ]}
-                onPress={handleTest}
-                disabled={testStatus === 'testing'}
-              >
-                {testStatus === 'testing'
-                  ? <ActivityIndicator size="small" color={Colors.amber} />
-                  : <Text style={[
-                      styles.testBtnText,
-                      testStatus === 'ok'   && { color: Colors.green },
-                      testStatus === 'fail' && { color: Colors.red },
-                    ]}>
-                      {testStatus === 'ok'   ? '✓  CONNECTION OK' :
-                       testStatus === 'fail' ? '✕  TEST FAILED'   :
-                       '⚡  TEST CONNECTION'}
+                {isWanderer ? (
+                  <>
+                    <Text style={styles.howToTitle}>▸ WANDERER NODE RPC</Text>
+                    <Text style={styles.howToText}>
+                      IN WANDERER MODE THE NODE RUNS ON THIS DEVICE.{'\n'}
+                      RPC CONNECTS TO 127.0.0.1:8332 AUTOMATICALLY.{'\n'}
+                      NO MANUAL CONFIGURATION REQUIRED.{'\n\n'}
+                      USE THE NODE CONFIG SECTION ABOVE TO WRITE{'\n'}
+                      AND VERIFY THE LOCAL NODE CONFIG FILE.
                     </Text>
-                }
-              </TouchableOpacity>
-
-              {testMessage ? (
-                <Text style={[
-                  styles.testMessage,
-                  { color: testStatus === 'ok' ? Colors.green : Colors.red },
-                ]}>
-                  {testMessage}
-                </Text>
-              ) : null}
-
-              {/* ── Save button ── */}
-              <TouchableOpacity
-                style={[
-                  styles.saveBtn,
-                  saveStatus === 'saved' && styles.saveBtnOk,
-                  saveStatus === 'error' && styles.saveBtnFail,
-                ]}
-                onPress={handleSave}
-                disabled={saveStatus === 'saving'}
-              >
-                {saveStatus === 'saving'
-                  ? <ActivityIndicator size="small" color={Colors.green} />
-                  : <Text style={[
-                      styles.saveBtnText,
-                      saveStatus === 'saved' && { color: Colors.green },
-                      saveStatus === 'error' && { color: Colors.red },
-                    ]}>
-                      {saveStatus === 'saved' ? '✓  CONFIG SAVED' :
-                       saveStatus === 'error' ? '✕  CHECK ALL FIELDS' :
-                       'SAVE CONFIG'}
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.howToTitle}>▸ TAILSCALE QUICK SETUP</Text>
+                    <Text style={styles.howToText}>
+                      {'1. '}INSTALL TAILSCALE ON YOUR PHONE + NODE PC{'\n'}
+                      {'2. '}SIGN IN TO BOTH WITH THE SAME ACCOUNT{'\n'}
+                      {'3. '}ON THE NODE PC, RUN:{'\n'}
+                      {'     '}tailscale ip -4{'\n'}
+                      {'     '}→ YOU'LL GET A 100.x.x.x ADDRESS{'\n'}
+                      {'4. '}ADD TO YOUR CapStash.conf:{'\n'}
+                      {'     '}server=1{'\n'}
+                      {'     '}rpcbind=0.0.0.0{'\n'}
+                      {'     '}rpcallowip=100.64.0.0/10{'\n'}
+                      {'     '}rpcport=8332{'\n'}
+                      {'5. '}RESTART YOUR QT NODE{'\n'}
+                      {'6. '}ENTER THE 100.x.x.x ADDRESS BELOW + 8332 AS PORT
                     </Text>
-                }
-              </TouchableOpacity>
+                  </>
+                )}
+              </View>
 
-              <Text style={styles.saveNote}>
-                ▸ CREDENTIALS ARE ENCRYPTED ON YOUR DEVICE{'\n'}
-                ▸ TEST THE CONNECTION FIRST, THEN SAVE{'\n'}
-                ▸ SAVE UPDATES ALL SCREENS IMMEDIATELY
-              </Text>
+              {/* Only show manual fields in Drifter mode */}
+              {!isWanderer && (
+                <>
+                  <Text style={styles.fieldLabel}>IP ADDRESS</Text>
+                  <Text style={styles.fieldHint}>Your node's Tailscale IP — e.g. 100.64.0.1</Text>
+                  <View style={styles.passwordRow}>
+                    <TextInput
+                      style={[styles.input, styles.passwordInput]}
+                      value={ip}
+                      onChangeText={t => { setIp(t); resetTestState(); }}
+                      placeholder="100.x.x.x"
+                      placeholderTextColor={Colors.greenDim}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="decimal-pad"
+                      secureTextEntry={!showIp}
+                    />
+                    <TouchableOpacity style={styles.togglePassBtn} onPress={() => setShowIp(p => !p)}>
+                      <Text style={styles.togglePassText}>{showIp ? 'HIDE' : 'SHOW'}</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={[styles.fieldLabel, styles.fieldSpacing]}>PORT</Text>
+                  <Text style={styles.fieldHint}>Default is 8332</Text>
+                  <View style={styles.passwordRow}>
+                    <TextInput
+                      style={[styles.input, styles.passwordInput]}
+                      value={port}
+                      onChangeText={t => { setPort(t); resetTestState(); }}
+                      placeholder="8332"
+                      placeholderTextColor={Colors.greenDim}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="number-pad"
+                      secureTextEntry={!showPort}
+                    />
+                    <TouchableOpacity style={styles.togglePassBtn} onPress={() => setShowPort(p => !p)}>
+                      <Text style={styles.togglePassText}>{showPort ? 'HIDE' : 'SHOW'}</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={[styles.fieldLabel, styles.fieldSpacing]}>USERNAME</Text>
+                  <Text style={styles.fieldHint}>Matches rpcuser in your CapStash.conf</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={username}
+                    onChangeText={t => { setUsername(t); resetTestState(); }}
+                    placeholder="rpcuser"
+                    placeholderTextColor={Colors.greenDim}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+
+                  <Text style={[styles.fieldLabel, styles.fieldSpacing]}>PASSWORD</Text>
+                  <Text style={styles.fieldHint}>Matches rpcpassword in your CapStash.conf</Text>
+                  <View style={styles.passwordRow}>
+                    <TextInput
+                      style={[styles.input, styles.passwordInput]}
+                      value={password}
+                      onChangeText={t => { setPassword(t); resetTestState(); }}
+                      placeholder="rpcpassword"
+                      placeholderTextColor={Colors.greenDim}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      secureTextEntry={!showPass}
+                    />
+                    <TouchableOpacity style={styles.togglePassBtn} onPress={() => setShowPass(p => !p)}>
+                      <Text style={styles.togglePassText}>{showPass ? 'HIDE' : 'SHOW'}</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.testBtn,
+                      testStatus === 'ok'   && styles.testBtnOk,
+                      testStatus === 'fail' && styles.testBtnFail,
+                    ]}
+                    onPress={handleTest}
+                    disabled={testStatus === 'testing'}
+                  >
+                    {testStatus === 'testing'
+                      ? <ActivityIndicator size="small" color={Colors.amber} />
+                      : <Text style={[
+                          styles.testBtnText,
+                          testStatus === 'ok'   && { color: Colors.green },
+                          testStatus === 'fail' && { color: Colors.red },
+                        ]}>
+                          {testStatus === 'ok'   ? '✓  CONNECTION OK'  :
+                           testStatus === 'fail' ? '✕  TEST FAILED'    :
+                           '⚡  TEST CONNECTION'}
+                        </Text>
+                    }
+                  </TouchableOpacity>
+
+                  {testMessage ? (
+                    <Text style={[
+                      styles.testMessage,
+                      { color: testStatus === 'ok' ? Colors.green : Colors.red },
+                    ]}>
+                      {testMessage}
+                    </Text>
+                  ) : null}
+
+                  <TouchableOpacity
+                    style={[
+                      styles.saveBtn,
+                      saveStatus === 'saved' && styles.saveBtnOk,
+                      saveStatus === 'error' && styles.saveBtnFail,
+                    ]}
+                    onPress={handleSave}
+                    disabled={saveStatus === 'saving'}
+                  >
+                    {saveStatus === 'saving'
+                      ? <ActivityIndicator size="small" color={Colors.green} />
+                      : <Text style={[
+                          styles.saveBtnText,
+                          saveStatus === 'saved' && { color: Colors.green },
+                          saveStatus === 'error' && { color: Colors.red },
+                        ]}>
+                          {saveStatus === 'saved' ? '✓  CONFIG SAVED'     :
+                           saveStatus === 'error' ? '✕  CHECK ALL FIELDS' :
+                           'SAVE CONFIG'}
+                        </Text>
+                    }
+                  </TouchableOpacity>
+
+                  <Text style={styles.saveNote}>
+                    ▸ CREDENTIALS ARE ENCRYPTED ON YOUR DEVICE{'\n'}
+                    ▸ TEST THE CONNECTION FIRST, THEN SAVE{'\n'}
+                    ▸ SAVE UPDATES ALL SCREENS IMMEDIATELY
+                  </Text>
+                </>
+              )}
             </View>
           )}
 
           <View style={styles.divider} />
 
-          {/* ════════════════════════════════════════════
-              SECTION: WALLET SECURITY
-          ════════════════════════════════════════════ */}
+          {/* ── Wallet Security ── */}
           <SectionHeader
             label="▸ WALLET SECURITY"
             open={activeSection === 'security'}
@@ -405,9 +491,9 @@ export default function SetupMenu({
               </View>
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
-                  ▸ CURRENTLY USING KEYS FROM YOUR QT NODE{'\n'}
-                  ▸ DO NOT SHARE YOUR RPC PASSWORD{'\n'}
-                  ▸ TAILSCALE ENCRYPTS ALL RPC TRAFFIC IN TRANSIT
+                  {isWanderer
+                    ? '▸ WANDERER MODE USES LOCAL NODE KEYS\n▸ KEEP YOUR DEVICE SECURE\n▸ BACKUP YOUR WALLET DATA REGULARLY'
+                    : '▸ CURRENTLY USING KEYS FROM YOUR QT NODE\n▸ DO NOT SHARE YOUR RPC PASSWORD\n▸ TAILSCALE ENCRYPTS ALL RPC TRAFFIC IN TRANSIT'}
                 </Text>
               </View>
             </View>
@@ -415,9 +501,7 @@ export default function SetupMenu({
 
           <View style={styles.divider} />
 
-          {/* ════════════════════════════════════════════
-              SECTION: ERROR REFERENCE
-          ════════════════════════════════════════════ */}
+          {/* ── Error Reference ── */}
           <SectionHeader
             label="▸ ERROR REFERENCE"
             open={activeSection === 'errors'}
@@ -426,12 +510,12 @@ export default function SetupMenu({
           {activeSection === 'errors' && (
             <View style={styles.sectionBody}>
               {[
-                { code: 'ERR_01', title: 'NO NODE CONNECTION',  fix: 'Check Tailscale is active on both devices and the Qt node is running' },
+                { code: 'ERR_01', title: 'NO NODE CONNECTION',  fix: isWanderer ? 'Local capstashd not running yet — awaiting daemon compile' : 'Check Tailscale is active on both devices and the Qt node is running' },
                 { code: 'ERR_02', title: 'NODE NOT SYNCED',     fix: 'Wait for chain sync to complete before mining or exploring' },
                 { code: 'ERR_03', title: 'NO BLOCK TEMPLATE',   fix: 'Node must be fully synced to serve block templates for mining' },
                 { code: 'ERR_04', title: 'CONFIG INCOMPLETE',   fix: 'Open Setup Menu and fill in all four node config fields' },
                 { code: 'ERR_05', title: 'RPC AUTH FAILED',     fix: 'Username or password does not match your CapStash.conf — check both' },
-                { code: 'ERR_06', title: 'RPC TIMEOUT',         fix: 'Tailscale not active, node offline, or wrong IP/port' },
+                { code: 'ERR_06', title: 'RPC TIMEOUT',         fix: isWanderer ? 'Local node not responding — capstashd may not be running' : 'Tailscale not active, node offline, or wrong IP/port' },
               ].map(e => (
                 <View key={e.code} style={styles.errorRow}>
                   <View style={styles.errorTop}>
@@ -446,9 +530,7 @@ export default function SetupMenu({
 
           <View style={styles.divider} />
 
-          {/* ════════════════════════════════════════════
-              SECTION: APP INFO
-          ════════════════════════════════════════════ */}
+          {/* ── App Info ── */}
           <SectionHeader
             label="▸ APP INFO"
             open={activeSection === 'info'}
@@ -459,7 +541,7 @@ export default function SetupMenu({
               {[
                 ['APP',     'CAPSTASH WALLET'],
                 ['VERSION', APP_VERSION],
-                ['MODE',    currentMode],
+                ['MODE',    currentMode.toUpperCase()],
                 ['NETWORK', 'CAPSTASH MAINNET'],
                 ['POW',     'WHIRLPOOL-512 XOR/256'],
                 ['REWARD',  '1 CAP / BLOCK'],
@@ -484,22 +566,19 @@ export default function SetupMenu({
   );
 }
 
-// ── Section Header ────────────────────────────────────────
+// ── Section Header ─────────────────────────────────────────
 function SectionHeader({ label, open, onPress }) {
   return (
     <TouchableOpacity style={styles.sectionHeaderRow} onPress={onPress}>
       <Text style={[styles.sectionHeaderText, open && { color: Colors.green }]}>{label}</Text>
-      <Text style={[styles.sectionArrow, open && { color: Colors.green }]}>{open ? '▲' : '▼'}</Text>
+      <Text style={[styles.sectionArrow,      open && { color: Colors.green }]}>{open ? '▲' : '▼'}</Text>
     </TouchableOpacity>
   );
 }
 
-// ── Styles ────────────────────────────────────────────────
+// ── Styles ─────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.black,
-  },
+  root:            { flex: 1, backgroundColor: Colors.black },
   header: {
     flexDirection:     'row',
     justifyContent:    'space-between',
@@ -536,10 +615,7 @@ const styles = StyleSheet.create({
     color:         Colors.greenDim,
     letterSpacing: 1,
   },
-  scroll: {
-    flex:    1,
-    padding: 14,
-  },
+  scroll:          { flex: 1, padding: 14 },
   modeBanner: {
     flexDirection:   'row',
     justifyContent:  'space-between',
@@ -566,9 +642,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginTop:     2,
   },
-  modeStatus: {
+  modeStatusBlock: {
     alignItems: 'center',
-    gap:        4,
+    gap:        6,
   },
   statusDot: {
     width:        12,
@@ -579,12 +655,24 @@ const styles = StyleSheet.create({
     ...Typography.micro,
     letterSpacing: 1,
   },
+  switchModeBtn: {
+    borderWidth:       1,
+    borderColor:       Colors.borderDim,
+    paddingHorizontal: 8,
+    paddingVertical:   4,
+    marginTop:         4,
+  },
+  switchModeBtnText: {
+    ...Typography.micro,
+    color:         Colors.greenDim,
+    letterSpacing: 1,
+  },
   wandererCard: {
     borderWidth:     1,
     borderColor:     Colors.amberDim,
     borderStyle:     'dashed',
     backgroundColor: Colors.surface,
-    padding:         10,
+    padding:         12,
     marginBottom:    10,
   },
   wandererTitle: {
@@ -597,6 +685,59 @@ const styles = StyleSheet.create({
     ...Typography.micro,
     color:      Colors.amberDim,
     lineHeight: 15,
+    marginBottom: 4,
+  },
+  confDivider: {
+    height:          1,
+    backgroundColor: Colors.amberDim,
+    opacity:         0.3,
+    marginVertical:  10,
+  },
+  confRow: {
+    flexDirection:   'row',
+    justifyContent:  'space-between',
+    alignItems:      'center',
+    marginBottom:    5,
+  },
+  confLabel: {
+    ...Typography.micro,
+    color:         Colors.greenDim,
+    letterSpacing: 2,
+    width:         70,
+  },
+  confValue: {
+    ...Typography.micro,
+    color:      Colors.green,
+    flex:       1,
+    textAlign:  'right',
+    fontFamily: 'ShareTechMono',
+  },
+  confButtonRow: {
+    flexDirection: 'row',
+    gap:           8,
+    marginTop:     12,
+    marginBottom:  6,
+  },
+  confBtn: {
+    flex:            1,
+    borderWidth:     1,
+    borderColor:     Colors.amber,
+    paddingVertical: 10,
+    alignItems:      'center',
+    borderRadius:    2,
+  },
+  confBtnText: {
+    ...Typography.micro,
+    color:         Colors.amber,
+    letterSpacing: 2,
+  },
+  confOutput: {
+    ...Typography.micro,
+    color:       Colors.greenDim,
+    marginTop:   8,
+    lineHeight:  16,
+    letterSpacing: 0.5,
+    fontFamily:  'ShareTechMono',
   },
   divider: {
     height:          1,
@@ -619,9 +760,7 @@ const styles = StyleSheet.create({
     ...Typography.small,
     color: Colors.greenDim,
   },
-  sectionBody: {
-    paddingBottom: 12,
-  },
+  sectionBody:     { paddingBottom: 12 },
   howToBox: {
     borderWidth:     1,
     borderColor:     Colors.border,
@@ -653,9 +792,7 @@ const styles = StyleSheet.create({
     marginBottom:  5,
     fontSize:      9,
   },
-  fieldSpacing: {
-    marginTop: 14,
-  },
+  fieldSpacing:    { marginTop: 14 },
   input: {
     backgroundColor: Colors.black,
     borderWidth:     1,
@@ -671,9 +808,7 @@ const styles = StyleSheet.create({
     alignItems:    'stretch',
     gap:           6,
   },
-  passwordInput: {
-    flex: 1,
-  },
+  passwordInput:   { flex: 1 },
   togglePassBtn: {
     borderWidth:       1,
     borderColor:       Colors.borderDim,
@@ -694,8 +829,8 @@ const styles = StyleSheet.create({
     minHeight:      40,
     justifyContent: 'center',
   },
-  testBtnOk:   { borderColor: Colors.green },
-  testBtnFail: { borderColor: Colors.red   },
+  testBtnOk:       { borderColor: Colors.green },
+  testBtnFail:     { borderColor: Colors.red   },
   testBtnText: {
     ...Typography.labelSmall,
     color:         Colors.amber,
@@ -717,8 +852,8 @@ const styles = StyleSheet.create({
     minHeight:      40,
     justifyContent: 'center',
   },
-  saveBtnOk:   { backgroundColor: Colors.greenDark, borderColor: Colors.green },
-  saveBtnFail: { borderColor: Colors.red },
+  saveBtnOk:       { backgroundColor: Colors.greenDark, borderColor: Colors.green },
+  saveBtnFail:     { borderColor: Colors.red },
   saveBtnText: {
     ...Typography.labelSmall,
     color:         Colors.green,
