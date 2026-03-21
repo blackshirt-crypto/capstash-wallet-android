@@ -5,37 +5,43 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   RefreshControl, StyleSheet, Modal, Clipboard,
-  KeyboardAvoidingView, Platform,
+  TextInput, Alert,
 } from 'react-native';
-import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
-// TODO: uncomment after: npm install react-native-qrcode-svg
-// import QRCode from 'react-native-qrcode-svg';
+import { Camera, useCameraDevice, useCodeScanner, useCameraPermission } from 'react-native-vision-camera';
+import QRCode from 'react-native-qrcode-svg';
 import TierName  from '../components/TierName';
-import { getBalances, listTransactions, getWalletAddresses } from '../services/rpc';
+import { getBalances, listTransactions, getWalletAddresses, sendToAddress } from '../services/rpc';
 import Colors    from '../theme/colors';
-import { Typography } from '../theme/typography';
+import Typography from '../theme/typography';
 
-const TX_INITIAL = 5;   // transactions shown by default
-const TX_FULL    = 20;  // transactions shown when expanded
+const TX_INITIAL = 5;
+const TX_FULL    = 20;
 
 export default function WalletScreen({ nodeConfig }) {
-  const [balance,    setBalance]    = useState(null);
-  const [txs,        setTxs]        = useState([]);
-  const [myAddress,  setMyAddress]  = useState(null);
+  const [balance,      setBalance]      = useState(null);
+  const [txs,          setTxs]          = useState([]);
+  const [myAddress,    setMyAddress]    = useState(null);
   const [allAddresses, setAllAddresses] = useState([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [showAllTx,  setShowAllTx]  = useState(false);
-  const [balanceHidden, setBalanceHidden] = useState(false);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [showAllTx,    setShowAllTx]    = useState(false);
+  const [balanceHidden,setBalanceHidden]= useState(false);
 
-  // ── Receive modal ──────────────────────────────────────────
+  // ── Receive modal ───────────────────────────────────────────
   const [showReceive, setShowReceive] = useState(false);
   const [copied,      setCopied]      = useState(false);
 
-  // ── Scan modal ─────────────────────────────────────────────
-  const [showScan,   setShowScan]   = useState(false);
-  const [scannedAddr, setScannedAddr] = useState('');
+  // ── Send modal ──────────────────────────────────────────────
+  const [showSend,     setShowSend]     = useState(false);
+  const [sendAddress,  setSendAddress]  = useState('');
+  const [sendAmount,   setSendAmount]   = useState('');
+  const [sendStep,     setSendStep]     = useState('address'); // 'address' | 'amount' | 'confirm'
+  const [sending,      setSending]      = useState(false);
+
+  // ── Camera / scan ───────────────────────────────────────────
+  const [showScan,  setShowScan]  = useState(false);
   const scanned = useRef(false);
   const device  = useCameraDevice('back');
+  const { hasPermission, requestPermission } = useCameraPermission();
 
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
@@ -44,23 +50,22 @@ export default function WalletScreen({ nodeConfig }) {
       const raw = codes[0].value || '';
       if (!raw) return;
       scanned.current = true;
-      const clean = raw.replace(/^[a-zA-Z]+:/i, '').split('?')[0].trim();
-      setScannedAddr(clean);
+      let clean = raw.replace(/^[a-zA-Z]+:/i, '').split('?')[0].trim();
+      if (clean.toUpperCase().startsWith('CAP1')) clean = clean.toLowerCase();
+      setSendAddress(clean);
       setShowScan(false);
+      setSendStep('amount');
     },
   });
 
-  // ── Load ───────────────────────────────────────────────────
+  // ── Load ────────────────────────────────────────────────────
   const load = useCallback(async () => {
     try {
       const bal = await getBalances(nodeConfig);
       setBalance(bal?.mine?.trusted ?? 0);
-
       const transactions = await listTransactions(nodeConfig, TX_FULL);
       setTxs(transactions || []);
-
       const addresses = await getWalletAddresses(nodeConfig);
-      console.log('ADDRESSES:', JSON.stringify(addresses));
       if (addresses && addresses.length > 0) {
         setMyAddress(addresses[0].address);
         setAllAddresses(addresses);
@@ -72,12 +77,8 @@ export default function WalletScreen({ nodeConfig }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Clear scanned address when scan modal opens
   useEffect(() => {
-    if (showScan) {
-      scanned.current = false;
-      setScannedAddr('');
-    }
+    if (showScan) scanned.current = false;
   }, [showScan]);
 
   const onRefresh = async () => {
@@ -86,14 +87,72 @@ export default function WalletScreen({ nodeConfig }) {
     setRefreshing(false);
   };
 
-  const handleCopy = () => {
-    if (!myAddress) return;
-    Clipboard.setString(myAddress);
+  // ── Camera permission ───────────────────────────────────────
+  const openCamera = async () => {
+    if (!hasPermission) {
+      const granted = await requestPermission();
+      if (!granted) {
+        Alert.alert(
+          'Camera Permission',
+          'Camera access is required to scan wallet addresses. Please enable it in Settings.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+    }
+    setShowScan(true);
+  };
+
+  // ── Send handlers ───────────────────────────────────────────
+  const handleOpenSend = () => {
+    setSendAddress('');
+    setSendAmount('');
+    setSendStep('address');
+    setShowSend(true);
+  };
+
+  const handleSendAddressSelect = (addr) => {
+    setSendAddress(addr);
+    setSendStep('amount');
+  };
+
+  const handleConfirmSend = async () => {
+    if (!sendAddress || !sendAmount) return;
+    const amount = parseFloat(sendAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid amount.');
+      return;
+    }
+    setSendStep('confirm');
+  };
+
+const handleExecuteSend = async () => {
+    setSending(true);
+    console.log('SEND:', sendAddress, parseFloat(sendAmount), nodeConfig);
+try {
+  console.log('[SEND] nodeConfig received by WalletScreen:', JSON.stringify(nodeConfig));
+  console.log('[SEND] cachedConfig check — firing sendToAddress now');
+  const cleanAddr = sendAddress.startsWith('CAP1') ? sendAddress.toLowerCase() : sendAddress;
+  const result = await sendToAddress(nodeConfig, cleanAddr, parseFloat(sendAmount));
+  console.log('SEND RESULT:', result);
+  Alert.alert('✓ Sent', `${sendAmount} CAP sent to ${sendAddress.slice(0,10)}...`);
+  setShowSend(false);
+  load();
+} catch (e) {
+  Alert.alert('Send Failed', e.message || 'Transaction failed. Check node connection.');
+} finally {
+  setSending(false);
+}
+  };
+
+  // ── Copy ────────────────────────────────────────────────────
+  const handleCopy = (addr) => {
+    Clipboard.setString(addr || myAddress || '');
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // ── Formatters ─────────────────────────────────────────────
+  // ── Formatters ──────────────────────────────────────────────
   const formatTime = (timestamp) => {
     const diff = Math.floor(Date.now() / 1000 - timestamp);
     if (diff < 60)    return `${diff}S AGO`;
@@ -101,6 +160,15 @@ export default function WalletScreen({ nodeConfig }) {
     if (diff < 86400) return `${Math.floor(diff / 3600)}H AGO`;
     return `${Math.floor(diff / 86400)}D AGO`;
   };
+
+  const maskAddr = (addr) => addr ? `${addr.slice(0,8)}...${addr.slice(-6)}` : '—';
+
+  // Recent unique sent addresses from tx history
+  const recentSentAddresses = [...new Set(
+    txs
+      .filter(tx => tx.category === 'send' && tx.address)
+      .map(tx => tx.address)
+  )].slice(0, 5);
 
   const displayedTxs = showAllTx ? txs : txs.slice(0, TX_INITIAL);
 
@@ -115,7 +183,6 @@ export default function WalletScreen({ nodeConfig }) {
       >
         {/* ── Balance card ── */}
         <View style={styles.balanceCard}>
-
           <View style={styles.balanceLabelRow}>
             <Text style={styles.balanceLabel}>WASTELAND ERA BALANCE</Text>
             <TouchableOpacity onPress={() => setBalanceHidden(h => !h)}>
@@ -124,13 +191,10 @@ export default function WalletScreen({ nodeConfig }) {
           </View>
 
           <Text style={styles.balanceAmount}>
-            {balanceHidden
-              ? '●●●.●●●●●●●'
-              : (balance !== null ? balance.toFixed(7) : '-.-------')}
+            {balanceHidden ? '●●●.●●●●●●●' : (balance !== null ? balance.toFixed(7) : '-.-------')}
           </Text>
           <Text style={styles.balanceCurrency}>CAPS</Text>
 
-          {/* Identity — centered with nuclear icons each side */}
           {myAddress ? (
             <View style={styles.identityRow}>
               <Text style={styles.verifiedIcon}>☢ </Text>
@@ -145,14 +209,14 @@ export default function WalletScreen({ nodeConfig }) {
             </View>
           )}
 
-          {/* Pre great war */}
-          <Text style={styles.preWarText}>
-            ~ pre "great war" value unknown
-          </Text>
+          <Text style={styles.preWarText}>~ pre "great war" value unknown</Text>
 
-          {/* Actions */}
+          {/* ── Two buttons ── */}
           <View style={styles.actionRow}>
-            <TouchableOpacity style={[styles.actionBtn, styles.primaryBtn]}>
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.primaryBtn]}
+              onPress={handleOpenSend}
+            >
               <Text style={styles.actionBtnTextPrimary}>▲ SEND</Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -161,36 +225,14 @@ export default function WalletScreen({ nodeConfig }) {
             >
               <Text style={styles.actionBtnText}>▼ RECEIVE</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={() => setShowScan(true)}
-            >
-              <Text style={styles.actionBtnText}>⊡ SCAN</Text>
-            </TouchableOpacity>
           </View>
         </View>
 
-        {/* ── Scanned address result ── */}
-        {scannedAddr ? (
-          <View style={styles.scannedCard}>
-            <Text style={styles.scannedLabel}>SCANNED ADDRESS</Text>
-            <Text style={styles.scannedAddr} numberOfLines={2}>{scannedAddr}</Text>
-            <TouchableOpacity
-              style={styles.scannedClearBtn}
-              onPress={() => setScannedAddr('')}
-            >
-              <Text style={styles.scannedClearText}>✕ CLEAR</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
         {/* ── Transactions ── */}
         <Text style={styles.sectionHeader}>▸ RECENT TRANSACTIONS</Text>
-
         {txs.length === 0 && (
           <Text style={styles.emptyText}>NO TRANSACTIONS FOUND</Text>
         )}
-
         {displayedTxs.map((tx, i) => {
           const isReceived = tx.category === 'immature' || tx.category === 'receive';
           const isBlock    = tx.category === 'immature';
@@ -207,32 +249,23 @@ export default function WalletScreen({ nodeConfig }) {
                 <Text style={styles.txTime}>
                   {formatTime(tx.time)} · CONF: {tx.confirmations}
                 </Text>
-                <Text style={styles.txId} numberOfLines={1}>
+                <Text style={styles.txId}>
                   {tx.address
-                    ? `${tx.address.slice(0, 6)}...${tx.address.slice(-6)}`
-                    : `${tx.txid?.slice(0, 6)}...${tx.txid?.slice(-6)}`}
+                    ? `${tx.address.slice(0,6)}...${tx.address.slice(-6)}`
+                    : `${tx.txid?.slice(0,6)}...${tx.txid?.slice(-6)}`}
                 </Text>
               </View>
-              <Text style={[
-                styles.txAmount,
-                { color: isReceived ? Colors.green : Colors.red },
-              ]}>
+              <Text style={[styles.txAmount, { color: isReceived ? Colors.green : Colors.red }]}>
                 {isReceived ? '+' : ''}{tx.amount?.toFixed(4)}
               </Text>
             </View>
           );
         })}
 
-        {/* Show more / less toggle */}
         {txs.length > TX_INITIAL && (
-          <TouchableOpacity
-            style={styles.showMoreBtn}
-            onPress={() => setShowAllTx(p => !p)}
-          >
+          <TouchableOpacity style={styles.showMoreBtn} onPress={() => setShowAllTx(p => !p)}>
             <Text style={styles.showMoreText}>
-              {showAllTx
-                ? '▲ SHOW LESS'
-                : `▼ SHOW MORE (${txs.length - TX_INITIAL} MORE)`}
+              {showAllTx ? '▲ SHOW LESS' : `▼ SHOW MORE (${txs.length - TX_INITIAL} MORE)`}
             </Text>
           </TouchableOpacity>
         )}
@@ -240,12 +273,10 @@ export default function WalletScreen({ nodeConfig }) {
         <View style={{ height: 24 }} />
       </ScrollView>
 
-      {/* ── Receive Modal ── */}
-      <Modal
-        visible={showReceive}
-        animationType="slide"
-        onRequestClose={() => setShowReceive(false)}
-      >
+      {/* ════════════════════════════════════════
+          RECEIVE MODAL
+      ════════════════════════════════════════ */}
+      <Modal visible={showReceive} animationType="slide" onRequestClose={() => setShowReceive(false)}>
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>▼ RECEIVE CAPS</Text>
@@ -253,47 +284,40 @@ export default function WalletScreen({ nodeConfig }) {
               <Text style={styles.modalClose}>✕ CLOSE</Text>
             </TouchableOpacity>
           </View>
-
           <ScrollView contentContainerStyle={styles.modalContent}>
-            <Text style={styles.receiveHint}>
-              SHARE THIS ADDRESS TO RECEIVE CAPS
-            </Text>
+            <Text style={styles.receiveHint}>SHARE THIS ADDRESS TO RECEIVE CAPS</Text>
 
-            {/* QR Code placeholder */}
+            {/* QR Code */}
             <View style={styles.qrPlaceholder}>
-              {/* TODO: replace View with QRCode after npm install react-native-qrcode-svg
-              <QRCode
-                value={myAddress || 'cap1'}
-                size={220}
-                color={Colors.green}
-                backgroundColor={Colors.black}
-              />
-              */}
-              <Text style={styles.qrComingSoon}>⬡</Text>
-              <Text style={styles.qrComingSoonText}>QR CODE</Text>
-              <Text style={styles.qrComingSoonSub}>
-                npm install react-native-qrcode-svg
-              </Text>
+              {myAddress ? (
+                <QRCode
+                  value={myAddress}
+                  size={200}
+                  color="#00ff41"
+                  backgroundColor="#0a0a0a"
+                />
+              ) : (
+                <>
+                  <Text style={styles.qrIcon}>☢</Text>
+                  <Text style={styles.qrLabel}>GENERATING...</Text>
+                </>
+              )}
             </View>
 
-            {/* Address display */}
+            {/* Address */}
             <View style={styles.addressBox}>
-              <Text style={styles.addressBoxText} selectable>
-                {myAddress || '—'}
-              </Text>
+              <Text style={styles.addressBoxText} selectable>{myAddress || '—'}</Text>
             </View>
 
-            {/* Copy button */}
             <TouchableOpacity
               style={[styles.copyBtn, copied && styles.copyBtnDone]}
-              onPress={handleCopy}
+              onPress={() => handleCopy(myAddress)}
             >
               <Text style={[styles.copyBtnText, copied && styles.copyBtnTextDone]}>
                 {copied ? '✓ COPIED TO CLIPBOARD' : '⎘ COPY ADDRESS'}
               </Text>
             </TouchableOpacity>
 
-            {/* All addresses */}
             {allAddresses.length > 1 && (
               <>
                 <Text style={styles.allAddrHeader}>ALL ADDRESSES</Text>
@@ -301,18 +325,10 @@ export default function WalletScreen({ nodeConfig }) {
                   <TouchableOpacity
                     key={a.address}
                     style={styles.addrRow}
-                    onPress={() => {
-                      Clipboard.setString(a.address);
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }}
+                    onPress={() => handleCopy(a.address)}
                   >
-                    <Text style={styles.addrRowLabel}>
-                      {a.label || `ADDRESS ${i + 1}`}
-                    </Text>
-                    <Text style={styles.addrRowAddr} numberOfLines={1}>
-                      {a.address?.slice(0, 18)}...
-                    </Text>
+                    <Text style={styles.addrRowLabel}>{a.label || `ADDRESS ${i + 1}`}</Text>
+                    <Text style={styles.addrRowAddr}>{maskAddr(a.address)}</Text>
                   </TouchableOpacity>
                 ))}
               </>
@@ -321,12 +337,183 @@ export default function WalletScreen({ nodeConfig }) {
         </View>
       </Modal>
 
-      {/* ── Scan Modal ── */}
-      <Modal
-        visible={showScan}
-        animationType="slide"
-        onRequestClose={() => setShowScan(false)}
-      >
+      {/* ════════════════════════════════════════
+          SEND MODAL
+      ════════════════════════════════════════ */}
+      <Modal visible={showSend} animationType="slide" onRequestClose={() => setShowSend(false)}>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>▲ SEND CAPS</Text>
+            <TouchableOpacity onPress={() => setShowSend(false)}>
+              <Text style={styles.modalClose}>✕ CLOSE</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ── Step: Address selection ── */}
+          {sendStep === 'address' && (
+            <ScrollView contentContainerStyle={styles.modalContent}>
+              <Text style={styles.sendStepLabel}>SELECT DESTINATION</Text>
+
+              {/* Scan new */}
+              <TouchableOpacity style={styles.scanNewBtn} onPress={openCamera}>
+                <Text style={styles.scanNewIcon}>⊡</Text>
+                <Text style={styles.scanNewText}>SCAN NEW ADDRESS</Text>
+              </TouchableOpacity>
+
+              {/* Manual entry */}
+              <View style={styles.manualEntryCard}>
+                <Text style={styles.inputLabel}>OR ENTER ADDRESS MANUALLY</Text>
+                <TextInput
+                  style={styles.addrInput}
+                  value={sendAddress}
+                  onChangeText={setSendAddress}
+                  placeholder="cap1q... or C... or 8..."
+                  placeholderTextColor={Colors.greenDim}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {sendAddress.length > 10 && (
+                  <TouchableOpacity
+                    style={styles.nextBtn}
+                    onPress={() => setSendStep('amount')}
+                  >
+                    <Text style={styles.nextBtnText}>NEXT →</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Recent addresses */}
+              {recentSentAddresses.length > 0 && (
+                <>
+                  <Text style={styles.recentHeader}>RECENT</Text>
+                  {recentSentAddresses.map((addr, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={styles.recentAddrRow}
+                      onPress={() => handleSendAddressSelect(addr)}
+                    >
+                      <Text style={styles.recentAddrText}>{maskAddr(addr)}</Text>
+                      <Text style={styles.recentAddrArrow}>→</Text>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              )}
+
+              {/* Own addresses */}
+              <Text style={styles.recentHeader}>MY ADDRESSES</Text>
+              {allAddresses.map((a, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={styles.recentAddrRow}
+                  onPress={() => handleSendAddressSelect(a.address)}
+                >
+                  <View>
+                    <Text style={styles.addrRowLabel}>{a.label || `ADDRESS ${i + 1}`}</Text>
+                    <Text style={styles.recentAddrText}>{maskAddr(a.address)}</Text>
+                  </View>
+                  <Text style={styles.recentAddrArrow}>→</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+
+          {/* ── Step: Amount entry ── */}
+          {sendStep === 'amount' && (
+            <View style={styles.modalContent}>
+              <Text style={styles.sendStepLabel}>ENTER AMOUNT</Text>
+
+              <View style={styles.sendToCard}>
+                <Text style={styles.sendToLabel}>TO</Text>
+                <Text style={styles.sendToAddr}>{maskAddr(sendAddress)}</Text>
+                <TouchableOpacity onPress={() => setSendStep('address')}>
+                  <Text style={styles.changeBtn}>CHANGE</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.amountCard}>
+                <TextInput
+                  style={styles.amountInput}
+                  value={sendAmount}
+                  onChangeText={setSendAmount}
+                  placeholder="0.0000000"
+                  placeholderTextColor={Colors.greenDim}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                />
+                <Text style={styles.amountCurrency}>CAP</Text>
+              </View>
+
+              {balance !== null && (
+                <TouchableOpacity onPress={() => setSendAmount(balance.toFixed(7))}>
+                  <Text style={styles.maxBtn}>USE MAX: {balance.toFixed(4)} CAP</Text>
+                </TouchableOpacity>
+              )}
+
+              <Text style={styles.feeNote}>NETWORK FEE: ~0.0001 CAP</Text>
+
+              <TouchableOpacity
+                style={[styles.confirmBtn, (!sendAmount || parseFloat(sendAmount) <= 0) && styles.confirmBtnDisabled]}
+                onPress={handleConfirmSend}
+                disabled={!sendAmount || parseFloat(sendAmount) <= 0}
+              >
+                <Text style={styles.confirmBtnText}>REVIEW TRANSACTION →</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* ── Step: Confirm ── */}
+          {sendStep === 'confirm' && (
+            <View style={styles.modalContent}>
+              <Text style={styles.sendStepLabel}>CONFIRM TRANSACTION</Text>
+
+              <View style={styles.confirmCard}>
+                <View style={styles.confirmRow}>
+                  <Text style={styles.confirmLabel}>TO</Text>
+                  <Text style={styles.confirmValue} numberOfLines={2}>{sendAddress}</Text>
+                </View>
+                <View style={styles.confirmRow}>
+                  <Text style={styles.confirmLabel}>AMOUNT</Text>
+                  <Text style={[styles.confirmValue, { color: Colors.amber }]}>
+                    {parseFloat(sendAmount).toFixed(7)} CAP
+                  </Text>
+                </View>
+                <View style={styles.confirmRow}>
+                  <Text style={styles.confirmLabel}>FEE</Text>
+                  <Text style={styles.confirmValue}>~0.0001 CAP</Text>
+                </View>
+                <View style={[styles.confirmRow, { borderBottomWidth: 0 }]}>
+                  <Text style={styles.confirmLabel}>TOTAL</Text>
+                  <Text style={[styles.confirmValue, { color: Colors.red }]}>
+                    {(parseFloat(sendAmount) + 0.0001).toFixed(7)} CAP
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.confirmBtn, sending && styles.confirmBtnDisabled]}
+                onPress={handleExecuteSend}
+                disabled={sending}
+              >
+                <Text style={styles.confirmBtnText}>
+                  {sending ? 'BROADCASTING...' : '⚡ CONFIRM SEND'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.backBtn}
+                onPress={() => setSendStep('amount')}
+              >
+                <Text style={styles.backBtnText}>← BACK</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </Modal>
+
+      {/* ════════════════════════════════════════
+          CAMERA / SCAN MODAL
+      ════════════════════════════════════════ */}
+      <Modal visible={showScan} animationType="slide" onRequestClose={() => setShowScan(false)}>
         <View style={styles.scannerContainer}>
           <Text style={styles.scannerTitle}>⊡ SCAN ADDRESS</Text>
           <Text style={styles.scannerHint}>POINT CAMERA AT WALLET QR CODE</Text>
@@ -348,10 +535,7 @@ export default function WalletScreen({ nodeConfig }) {
             <View style={styles.reticle} />
           </View>
 
-          <TouchableOpacity
-            style={styles.cancelScanBtn}
-            onPress={() => setShowScan(false)}
-          >
+          <TouchableOpacity style={styles.cancelScanBtn} onPress={() => setShowScan(false)}>
             <Text style={styles.cancelScanText}>[ CANCEL ]</Text>
           </TouchableOpacity>
         </View>
@@ -362,400 +546,318 @@ export default function WalletScreen({ nodeConfig }) {
 
 // ── Styles ────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.black,
-    padding: 14,
-  },
+  container: { flex: 1, backgroundColor: Colors.black, padding: 14 },
 
-  // ── Balance card ──
+  // Balance card
   balanceCard: {
     backgroundColor: Colors.surfaceLight,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderDim,
-    paddingBottom: 18,
-    marginBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: Colors.borderDim,
+    paddingBottom: 18, marginBottom: 16,
   },
   balanceLabelRow: {
-    flexDirection:  'row',
-    justifyContent: 'space-between',
-    alignItems:     'center',
-    marginBottom:   4,
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 4,
   },
   balanceLabel: {
-    ...Typography.heading,
-    color:         Colors.greenDim,
-    letterSpacing: 2,
+    fontFamily: 'ShareTechMono', fontSize: 16,
+    color: Colors.greenDim, letterSpacing: 2,
   },
   hideBtn: {
-    ...Typography.micro,
-    color:         Colors.greenDim,
-    letterSpacing: 2,
-    opacity:       0.6,
+    fontFamily: 'ShareTechMono', fontSize: 10,
+    color: Colors.greenDim, letterSpacing: 2, opacity: 0.6,
   },
   balanceAmount: {
-    ...Typography.gigantic,
-    color:            Colors.green,
-    textShadowColor:  Colors.green,
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 12,
-    lineHeight:       72,
+    fontFamily: 'ShareTechMono', fontSize: 42,
+    color: Colors.green,
+    textShadowColor: Colors.green, textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 12,
+    lineHeight: 50,
   },
   balanceCurrency: {
-    ...Typography.large,
-    color:         Colors.green,
-    letterSpacing: 6,
-    marginBottom:  8,
-    opacity:       0.9,
-    fontSize:      28,
+    fontFamily: 'ShareTechMono', fontSize: 28,
+    color: Colors.green, letterSpacing: 6, marginBottom: 8, opacity: 0.9,
   },
   identityRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'center',
-    marginTop:      6,
-    marginBottom:   4,
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'center', marginTop: 6, marginBottom: 4,
   },
-  verifiedIcon: {
-    color:    Colors.greenDim,
-    fontSize: 14,
-  },
+  verifiedIcon: { color: Colors.greenDim, fontSize: 14 },
   addressLoading: {
-    ...Typography.small,
-    color:         Colors.greenDim,
-    letterSpacing: 1,
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: Colors.greenDim, letterSpacing: 1,
   },
   preWarText: {
-    ...Typography.small,
-    color:         '#ffffff',
-    letterSpacing: 1,
-    marginTop:     12,
-    fontStyle:     'italic',
-    opacity:       0.6,
-    textAlign:     'center',
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: '#ffffff', letterSpacing: 1,
+    marginTop: 12, fontStyle: 'italic', opacity: 0.6, textAlign: 'center',
   },
 
-  // ── Actions ──
-  actionRow: {
-    flexDirection: 'row',
-    gap:           8,
-    marginTop:     16,
-  },
+  // Action buttons
+  actionRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
   actionBtn: {
-    flex:          1,
-    paddingVertical: 12,
-    borderWidth:   1,
-    borderColor:   Colors.borderDim,
-    alignItems:    'center',
-    borderRadius:  2,
+    flex: 1, paddingVertical: 12,
+    borderWidth: 1, borderColor: Colors.borderDim,
+    alignItems: 'center', borderRadius: 2,
   },
-  primaryBtn: {
-    borderColor: Colors.green,
-  },
+  primaryBtn: { borderColor: Colors.green },
   actionBtnText: {
-    ...Typography.labelSmall,
-    color:         Colors.green,
-    letterSpacing: 2,
+    fontFamily: 'ShareTechMono', fontSize: 13,
+    color: Colors.green, letterSpacing: 2,
   },
   actionBtnTextPrimary: {
-    ...Typography.labelSmall,
-    color:         Colors.green,
-    letterSpacing: 2,
+    fontFamily: 'ShareTechMono', fontSize: 13,
+    color: Colors.green, letterSpacing: 2,
   },
 
-  // ── Scanned result ──
-  scannedCard: {
-    borderWidth:     1,
-    borderColor:     Colors.amber,
-    backgroundColor: Colors.surface,
-    padding:         12,
-    marginBottom:    14,
-    borderRadius:    2,
-  },
-  scannedLabel: {
-    ...Typography.micro,
-    color:         Colors.amber,
-    letterSpacing: 2,
-    marginBottom:  6,
-  },
-  scannedAddr: {
-    ...Typography.small,
-    color:        Colors.green,
-    fontFamily:   'ShareTechMono',
-    lineHeight:   20,
-  },
-  scannedClearBtn: {
-    marginTop:  8,
-    alignSelf:  'flex-end',
-  },
-  scannedClearText: {
-    ...Typography.micro,
-    color:         Colors.red,
-    letterSpacing: 1,
-  },
-
-  // ── Section header ──
+  // Transactions
   sectionHeader: {
-    ...Typography.labelMedium,
-    color:             Colors.greenDim,
-    marginBottom:      10,
-    paddingBottom:     5,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    letterSpacing:     2,
+    fontFamily: 'ShareTechMono', fontSize: 13,
+    color: Colors.greenDim, marginBottom: 10, paddingBottom: 5,
+    borderBottomWidth: 1, borderBottomColor: Colors.border, letterSpacing: 2,
   },
   emptyText: {
-    ...Typography.body,
-    color:      Colors.greenDim,
-    textAlign:  'center',
-    marginTop:  24,
-    letterSpacing: 1,
+    fontFamily: 'ShareTechMono', fontSize: 13,
+    color: Colors.greenDim, textAlign: 'center', marginTop: 24, letterSpacing: 1,
   },
-
-  // ── Transactions ──
   txItem: {
-    flexDirection:  'row',
-    justifyContent: 'space-between',
-    alignItems:     'center',
-    padding:        12,
-    borderWidth:    1,
-    borderColor:    Colors.border,
-    backgroundColor: Colors.surface,
-    borderLeftWidth: 3,
-    marginBottom:   6,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    padding: 12, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, borderLeftWidth: 3, marginBottom: 6,
   },
   txReceived: { borderLeftColor: Colors.green },
   txSent:     { borderLeftColor: Colors.red },
-  txLeft: {
-    flex: 1,
-    marginRight: 12,
-  },
+  txLeft:     { flex: 1, marginRight: 12 },
   txType: {
-    ...Typography.small,
-    color:         Colors.green,
-    letterSpacing: 1,
-    marginBottom:  3,
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: Colors.green, letterSpacing: 1, marginBottom: 3,
   },
   txTime: {
-    ...Typography.tiny,
-    color:         Colors.greenDim,
-    marginBottom:  2,
+    fontFamily: 'ShareTechMono', fontSize: 11,
+    color: Colors.greenDim, marginBottom: 2,
   },
   txId: {
-    ...Typography.micro,
-    color:      Colors.greenDim,
-    fontFamily: 'ShareTechMono',
-    opacity:    0.7,
-    letterSpacing: 0.5,
+    fontFamily: 'ShareTechMono', fontSize: 10,
+    color: Colors.greenDim, opacity: 0.7,
   },
   txAmount: {
-    ...Typography.body,
-    fontFamily: 'ShareTechMono',
+    fontFamily: 'ShareTechMono', fontSize: 14,
   },
-
-  // ── Show more ──
   showMoreBtn: {
-    borderWidth:  1,
-    borderColor:  Colors.border,
-    paddingVertical: 12,
-    alignItems:   'center',
-    marginBottom: 8,
+    borderWidth: 1, borderColor: Colors.border,
+    paddingVertical: 12, alignItems: 'center', marginBottom: 8,
   },
   showMoreText: {
-    ...Typography.labelSmall,
-    color:         Colors.greenDim,
-    letterSpacing: 2,
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: Colors.greenDim, letterSpacing: 2,
   },
 
-  // ── Receive modal ──
-  modalContainer: {
-    flex:            1,
-    backgroundColor: Colors.black,
-  },
+  // Modal shared
+  modalContainer: { flex: 1, backgroundColor: Colors.black },
   modalHeader: {
-    flexDirection:     'row',
-    justifyContent:    'space-between',
-    alignItems:        'center',
-    padding:           16,
-    paddingTop:        52,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderDim,
-    backgroundColor:   Colors.surfaceLight,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    padding: 16, paddingTop: 52,
+    borderBottomWidth: 1, borderBottomColor: Colors.borderDim,
+    backgroundColor: Colors.surfaceLight,
   },
   modalTitle: {
-    ...Typography.heading,
-    color:         Colors.green,
-    letterSpacing: 3,
+    fontFamily: 'ShareTechMono', fontSize: 18,
+    color: Colors.green, letterSpacing: 3,
   },
   modalClose: {
-    ...Typography.small,
-    color:         Colors.greenDim,
-    letterSpacing: 1,
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: Colors.greenDim, letterSpacing: 1,
   },
-  modalContent: {
-    padding:    20,
-    alignItems: 'center',
-  },
+  modalContent: { padding: 20 },
+
+  // Receive modal
   receiveHint: {
-    ...Typography.labelSmall,
-    color:         Colors.greenDim,
-    letterSpacing: 2,
-    marginBottom:  24,
-    textAlign:     'center',
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: Colors.greenDim, letterSpacing: 2, marginBottom: 24, textAlign: 'center',
   },
   qrPlaceholder: {
-    width:           240,
-    height:          240,
-    borderWidth:     1,
-    borderColor:     Colors.green,
-    justifyContent:  'center',
-    alignItems:      'center',
-    marginBottom:    24,
-    backgroundColor: Colors.surface,
+    width: 220, height: 220,
+    borderWidth: 1, borderColor: Colors.green,
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: 24, backgroundColor: Colors.surface, alignSelf: 'center',
   },
-  qrComingSoon: {
-    fontSize: 64,
-    color:    Colors.green,
-    opacity:  0.3,
-  },
-  qrComingSoonText: {
-    ...Typography.labelSmall,
-    color:         Colors.greenDim,
-    letterSpacing: 3,
-    marginTop:     8,
-  },
-  qrComingSoonSub: {
-    ...Typography.micro,
-    color:      Colors.greenDim,
-    opacity:    0.5,
-    marginTop:  4,
-    fontFamily: 'ShareTechMono',
+  qrIcon:  { fontSize: 56, color: Colors.green, opacity: 0.3 },
+  qrLabel: {
+    fontFamily: 'ShareTechMono', fontSize: 11,
+    color: Colors.greenDim, letterSpacing: 2, marginTop: 8,
   },
   addressBox: {
-    borderWidth:     1,
-    borderColor:     Colors.green,
-    backgroundColor: Colors.surface,
-    padding:         14,
-    marginBottom:    16,
-    width:           '100%',
+    borderWidth: 1, borderColor: Colors.green,
+    backgroundColor: Colors.surface, padding: 14, marginBottom: 16,
   },
   addressBoxText: {
-    ...Typography.body,
-    color:      Colors.green,
-    fontFamily: 'ShareTechMono',
-    textAlign:  'center',
-    lineHeight: 22,
+    fontFamily: 'ShareTechMono', fontSize: 13,
+    color: Colors.green, textAlign: 'center', lineHeight: 22,
   },
   copyBtn: {
-    borderWidth:     1,
-    borderColor:     Colors.green,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    marginBottom:    24,
-    width:           '100%',
-    alignItems:      'center',
+    borderWidth: 1, borderColor: Colors.green,
+    paddingVertical: 14, alignItems: 'center', marginBottom: 24,
   },
-  copyBtnDone: {
-    backgroundColor: Colors.green,
-  },
-  copyBtnText: {
-    ...Typography.labelSmall,
-    color:         Colors.green,
-    letterSpacing: 2,
-  },
-  copyBtnTextDone: {
-    color: Colors.black,
-  },
+  copyBtnDone:     { backgroundColor: Colors.green },
+  copyBtnText:     { fontFamily: 'ShareTechMono', fontSize: 12, color: Colors.green, letterSpacing: 2 },
+  copyBtnTextDone: { color: Colors.black },
   allAddrHeader: {
-    ...Typography.labelSmall,
-    color:         Colors.greenDim,
-    letterSpacing: 2,
-    marginBottom:  8,
-    alignSelf:     'flex-start',
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: Colors.greenDim, letterSpacing: 2, marginBottom: 8,
   },
   addrRow: {
-    flexDirection:   'row',
-    justifyContent:  'space-between',
-    alignItems:      'center',
-    borderWidth:     1,
-    borderColor:     Colors.border,
-    backgroundColor: Colors.surface,
-    padding:         10,
-    marginBottom:    4,
-    width:           '100%',
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, padding: 10, marginBottom: 4,
   },
-  addrRowLabel: {
-    ...Typography.small,
-    color:         Colors.greenDim,
-    letterSpacing: 1,
+  addrRowLabel: { fontFamily: 'ShareTechMono', fontSize: 11, color: Colors.greenDim, letterSpacing: 1 },
+  addrRowAddr:  { fontFamily: 'ShareTechMono', fontSize: 11, color: Colors.green },
+
+  // Send modal
+  sendStepLabel: {
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: Colors.greenDim, letterSpacing: 3, marginBottom: 20,
   },
-  addrRowAddr: {
-    ...Typography.small,
-    color:      Colors.green,
-    fontFamily: 'ShareTechMono',
-    flex:       1,
-    textAlign:  'right',
-    marginLeft: 8,
+  scanNewBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: Colors.green,
+    paddingVertical: 16, marginBottom: 16, gap: 10,
+  },
+  scanNewIcon: { fontSize: 22, color: Colors.green },
+  scanNewText: {
+    fontFamily: 'ShareTechMono', fontSize: 14,
+    color: Colors.green, letterSpacing: 2,
+  },
+  manualEntryCard: {
+    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, padding: 12, marginBottom: 20,
+  },
+  inputLabel: {
+    fontFamily: 'ShareTechMono', fontSize: 10,
+    color: Colors.greenDim, letterSpacing: 2, marginBottom: 8,
+  },
+  addrInput: {
+    backgroundColor: Colors.black, borderWidth: 1, borderColor: Colors.borderDim,
+    color: Colors.green, fontFamily: 'ShareTechMono', fontSize: 12,
+    padding: 10, letterSpacing: 1,
+  },
+  nextBtn: {
+    marginTop: 10, borderWidth: 1, borderColor: Colors.green,
+    paddingVertical: 10, alignItems: 'center',
+  },
+  nextBtnText: {
+    fontFamily: 'ShareTechMono', fontSize: 13,
+    color: Colors.green, letterSpacing: 2,
+  },
+  recentHeader: {
+    fontFamily: 'ShareTechMono', fontSize: 11,
+    color: Colors.greenDim, letterSpacing: 3,
+    marginBottom: 8, marginTop: 4,
+    borderBottomWidth: 1, borderBottomColor: Colors.border, paddingBottom: 4,
+  },
+  recentAddrRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, padding: 12, marginBottom: 4,
+  },
+  recentAddrText: { fontFamily: 'ShareTechMono', fontSize: 12, color: Colors.green },
+  recentAddrArrow: { fontFamily: 'ShareTechMono', fontSize: 16, color: Colors.greenDim },
+
+  // Amount step
+  sendToCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, padding: 12, marginBottom: 16,
+  },
+  sendToLabel: { fontFamily: 'ShareTechMono', fontSize: 11, color: Colors.greenDim, letterSpacing: 2 },
+  sendToAddr:  { fontFamily: 'ShareTechMono', fontSize: 12, color: Colors.green, flex: 1, marginHorizontal: 8 },
+  changeBtn:   { fontFamily: 'ShareTechMono', fontSize: 11, color: Colors.amber, letterSpacing: 1 },
+  amountCard: {
+    flexDirection: 'row', alignItems: 'center',
+    borderWidth: 1, borderColor: Colors.green,
+    backgroundColor: Colors.surface, padding: 12, marginBottom: 8,
+  },
+  amountInput: {
+    flex: 1, fontFamily: 'ShareTechMono', fontSize: 28,
+    color: Colors.green, padding: 0,
+  },
+  amountCurrency: {
+    fontFamily: 'ShareTechMono', fontSize: 16,
+    color: Colors.greenDim, letterSpacing: 2,
+  },
+  maxBtn: {
+    fontFamily: 'ShareTechMono', fontSize: 11,
+    color: Colors.amber, letterSpacing: 1, marginBottom: 8,
+  },
+  feeNote: {
+    fontFamily: 'ShareTechMono', fontSize: 11,
+    color: Colors.greenDim, letterSpacing: 1, marginBottom: 24,
+  },
+  confirmBtn: {
+    borderWidth: 1, borderColor: Colors.green,
+    paddingVertical: 16, alignItems: 'center', marginBottom: 12,
+  },
+  confirmBtnDisabled: { borderColor: Colors.borderDim, opacity: 0.4 },
+  confirmBtnText: {
+    fontFamily: 'ShareTechMono', fontSize: 14,
+    color: Colors.green, letterSpacing: 2,
   },
 
-  // ── Scan modal ──
+  // Confirm step
+  confirmCard: {
+    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.surface, marginBottom: 24,
+  },
+  confirmRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+    padding: 12, borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  confirmLabel: {
+    fontFamily: 'ShareTechMono', fontSize: 11,
+    color: Colors.greenDim, letterSpacing: 2, width: 70,
+  },
+  confirmValue: {
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: Colors.green, flex: 1, textAlign: 'right',
+  },
+  backBtn: { alignItems: 'center', paddingVertical: 12 },
+  backBtnText: {
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: Colors.greenDim, letterSpacing: 2,
+  },
+
+  // Scanner
   scannerContainer: {
-    flex:            1,
-    backgroundColor: Colors.black,
-    alignItems:      'center',
-    paddingTop:      60,
+    flex: 1, backgroundColor: Colors.black,
+    alignItems: 'center', paddingTop: 60,
   },
   scannerTitle: {
-    ...Typography.heading,
-    color:         Colors.green,
-    letterSpacing: 3,
-    marginBottom:  6,
+    fontFamily: 'ShareTechMono', fontSize: 18,
+    color: Colors.green, letterSpacing: 3, marginBottom: 6,
   },
   scannerHint: {
-    ...Typography.labelSmall,
-    color:         Colors.greenDim,
-    letterSpacing: 1.5,
-    marginBottom:  24,
+    fontFamily: 'ShareTechMono', fontSize: 12,
+    color: Colors.greenDim, letterSpacing: 1.5, marginBottom: 24,
   },
-  camera: {
-    width: '100%',
-    flex:  1,
-  },
+  camera:      { width: '100%', flex: 1 },
   cameraPlaceholder: {
-    width:           '100%',
-    flex:            1,
-    justifyContent:  'center',
-    alignItems:      'center',
-    borderWidth:     1,
-    borderColor:     Colors.green,
-    opacity:         0.4,
+    width: '100%', flex: 1,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: Colors.green, opacity: 0.4,
   },
   cameraUnavail: {
-    ...Typography.labelSmall,
-    color:         Colors.greenDim,
-    letterSpacing: 2,
+    fontFamily: 'ShareTechMono', fontSize: 13,
+    color: Colors.greenDim, letterSpacing: 2,
   },
   reticleOverlay: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 80,
-    justifyContent: 'center',
-    alignItems:     'center',
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 80,
+    justifyContent: 'center', alignItems: 'center',
   },
   reticle: {
-    width:        220,
-    height:       220,
-    borderWidth:  2,
-    borderColor:  Colors.green,
-    borderRadius: 8,
-    opacity:      0.8,
+    width: 220, height: 220,
+    borderWidth: 2, borderColor: Colors.green, borderRadius: 8, opacity: 0.8,
   },
-  cancelScanBtn: {
-    paddingVertical:   20,
-    paddingHorizontal: 40,
-  },
+  cancelScanBtn: { paddingVertical: 20, paddingHorizontal: 40 },
   cancelScanText: {
-    ...Typography.labelSmall,
-    color:         Colors.green,
-    letterSpacing: 2,
+    fontFamily: 'ShareTechMono', fontSize: 13,
+    color: Colors.green, letterSpacing: 2,
   },
 });

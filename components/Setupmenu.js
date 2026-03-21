@@ -26,7 +26,7 @@ import {
 import Colors    from '../theme/colors';
 import Typography from '../theme/typography';
 
-const APP_VERSION = '1.0.0-DRIFTER';
+const APP_VERSION = '2.0.0-CAPSTASH';
 
 export default function SetupMenu({
   visible,
@@ -175,7 +175,11 @@ export default function SetupMenu({
               <Text style={[styles.modeName, { color: statusColor, textShadowColor: statusColor }]}>
                 {currentMode}
               </Text>
-              <Text style={styles.modeDesc}>COMPANION WALLET · SYNCS VIA TAILSCALE</Text>
+              <Text style={styles.modeDesc}>
+  {currentMode === 'wanderer' || currentMode === 'WANDERER'
+    ? 'SELF-CONTAINED · LOCAL NODE · NO TAILSCALE'
+    : 'REMOTE NODE · SYNCS VIA TAILSCALE OR LOCAL IP'}
+</Text>
             </View>
             <View style={styles.modeStatus}>
               <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
@@ -185,13 +189,17 @@ export default function SetupMenu({
             </View>
           </View>
 
-          {/* Wanderer teaser */}
-          <View style={styles.wandererCard}>
-            <Text style={styles.wandererTitle}>◈ WANDERER MODE — COMING SOON</Text>
-            <Text style={styles.wandererDesc}>
-              SELF-CONTAINED NODE · FULL CHAIN ON PHONE · ZERO LATENCY MINING
-            </Text>
-          </View>
+         {/* Wanderer node status — only shown in Wanderer mode */}
+          {(currentMode === 'wanderer' || currentMode === 'WANDERER') && (
+            <View style={styles.wandererCard}>
+              <Text style={styles.wandererTitle}>◈ LOCAL NODE STATUS</Text>
+              <Text style={styles.wandererDesc}>
+                {isOnline
+                  ? 'NODE RUNNING · CHAIN SYNCING'
+                  : 'NODE NOT STARTED · AWAITING CAPSTASHD'}
+              </Text>
+            </View>
+          )}
 
           <View style={styles.divider} />
 
