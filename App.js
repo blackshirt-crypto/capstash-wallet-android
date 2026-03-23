@@ -1,4 +1,4 @@
-// App.js
+// App.js v2.5
 // CapStash Wallet — Wallet of the Wasteland
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -16,9 +16,14 @@ import SoloScreen       from './screens/SoloScreen';
 import ModeSelectScreen from './screens/ModeSelectScreen';
 import FieldManual      from './components/FieldManual';
 import SetupMenu        from './components/Setupmenu';
-import { getBlockCount, getMiningInfo, loadNodeConfig } from './services/rpc';
-import { setAppMode as persistMode, clearAppMode, loadAppMode, MODE_WANDERER, MODE_DRIFTER, WANDERER_NODE_CONFIG } from './services/appMode';
-import Colors    from './theme/colors';
+import { getBlockCount, getMiningInfo, getBlockchainInfo, loadNodeConfig } from './services/rpc';
+import {
+  setAppMode as persistMode, clearAppMode, loadAppMode,
+  MODE_WANDERER, MODE_DRIFTER, WANDERER_NODE_CONFIG,
+} from './services/appMode';
+import { ensureWandererWallet } from './services/walletManager';
+import { startNode } from './services/nodeService';
+import Colors from './theme/colors';
 
 const Tab = createBottomTabNavigator();
 
@@ -29,6 +34,16 @@ const DEFAULT_NODE = {
   rpcpassword: 'wasteland',
 };
 
+// ── Node sync status for header indicator ─────────────────
+// RED   = node not running / no connection
+// AMBER = connected but still syncing (verificationprogress < 0.95)
+// GREEN = fully synced (verificationprogress >= 0.95)
+const NODE_STATUS = {
+  RED:   'red',
+  AMBER: 'amber',
+  GREEN: 'green',
+};
+
 export default function App() {
   const [blockHeight, setBlockHeight] = useState(0);
   const [networkHash, setNetworkHash] = useState(0);
@@ -36,14 +51,21 @@ export default function App() {
   const [isOnline,    setIsOnline]    = useState(true);
   const [showManual,  setShowManual]  = useState(false);
   const [showSetup,   setShowSetup]   = useState(false);
-  const [nodeConfig, setNodeConfig] = useState(DEFAULT_NODE);
-  const [appMode,     setAppMode]     = useState(null);  // null = not yet chosen
+  const [nodeConfig,  setNodeConfig]  = useState(DEFAULT_NODE);
+  const [appMode,     setAppMode]     = useState(null);
   const [configReady, setConfigReady] = useState(false);
+
+  // ── Wanderer wallet state ──────────────────────────────
+  const [walletAddress, setWalletAddress] = useState(null);
+  const [walletReady,   setWalletReady]   = useState(false);
+
+  // ── Node sync status — drives ☢ icon color ────────────
+  const [nodeStatus, setNodeStatus] = useState(NODE_STATUS.RED);
 
   const tickerAnim = useRef(new Animated.Value(0)).current;
 
-  // ── Load persisted app mode on boot ───────────────────────
- useEffect(() => {
+  // ── Load persisted app mode on boot ───────────────────
+  useEffect(() => {
     loadAppMode().then(m => {
       console.log('[App] loadAppMode returned:', JSON.stringify(m));
       if (!m) { setAppMode(null); return; }
@@ -57,7 +79,7 @@ export default function App() {
     });
   }, []);
 
-  // ── Load persisted node config on boot ────────────────────
+  // ── Load persisted node config on boot ────────────────
   useEffect(() => {
     loadNodeConfig().then(cfg => {
       if (cfg && typeof cfg === 'object') setNodeConfig(cfg);
@@ -66,29 +88,74 @@ export default function App() {
     });
   }, []);
 
-  // ── Wanderer mode — override nodeConfig to localhost ──────
+  // ── Wanderer mode — override nodeConfig to localhost ──
   useEffect(() => {
     if (!appMode) return;
     if (appMode === MODE_WANDERER) {
       setNodeConfig({
-        ip:          WANDERER_NODE_CONFIG.host,
-        port:        String(WANDERER_NODE_CONFIG.port),
-        rpcuser:     WANDERER_NODE_CONFIG.user,
-        rpcpassword: WANDERER_NODE_CONFIG.pass,
+        ip:           WANDERER_NODE_CONFIG.host,
+        port:         String(WANDERER_NODE_CONFIG.port),
+        rpcuser:      WANDERER_NODE_CONFIG.user,
+        rpcpassword:  WANDERER_NODE_CONFIG.pass,
         wandererMode: true,
       });
     }
   }, [appMode]);
 
-  // ── Handle mode selection from ModeSelectScreen ───────────
+  // ── Wanderer boot — start node then init wallet ────────
+  // Does NOT block the UI. Wallet screen loads immediately.
+  // ensureWandererWallet runs after a 5s delay to give capstashd time to start.
+  useEffect(() => {
+    if (appMode !== MODE_WANDERER || !configReady) return;
+
+    const wandererCfg = {
+      ip:           WANDERER_NODE_CONFIG.host,
+      port:         String(WANDERER_NODE_CONFIG.port),
+      rpcuser:      WANDERER_NODE_CONFIG.user,
+      rpcpassword:  WANDERER_NODE_CONFIG.pass,
+      wandererMode: true,
+    };
+
+    console.log('[App] Wanderer boot — starting node...');
+
+    // Start capstashd, wait 5s, then attempt wallet init
+    startNode()
+      .catch(e => console.warn('[App] startNode error:', e.message))
+      .then(() => new Promise(resolve => setTimeout(resolve, 5000)))
+      .then(() => ensureWandererWallet(wandererCfg))
+      .then(result => {
+        console.log('[App] ensureWandererWallet result:', JSON.stringify(result));
+        if (result.ready) {
+          setWalletAddress(result.address);
+          setWalletReady(true);
+        } else {
+          // Wallet init failed — not fatal, user can still see the screen.
+          // Node status indicator will show RED until node comes up.
+          console.warn('[App] Wallet init failed:', result.error);
+        }
+      })
+      .catch(e => console.error('[App] Wanderer boot error:', e.message));
+
+  }, [appMode, configReady]);
+
+  // ── Handle mode selection ──────────────────────────────
   const handleModeSelected = async (mode) => {
     await persistMode(mode);
+    if (mode === MODE_DRIFTER) {
+      setWalletAddress(null);
+      setWalletReady(false);
+      setNodeStatus(NODE_STATUS.RED);
+      const cfg = await loadNodeConfig();
+      if (cfg && !cfg.wandererMode) setNodeConfig(cfg);
+      else setNodeConfig(DEFAULT_NODE);
+    }
     setAppMode(mode);
   };
 
-  // ── Poll node stats ────────────────────────────────────────
+  // ── Poll node stats ────────────────────────────────────
   useEffect(() => {
     if (!configReady || !nodeConfig || !appMode) return;
+
     const poll = async () => {
       try {
         const [h, mining] = await Promise.all([
@@ -99,16 +166,38 @@ export default function App() {
         setDifficulty(mining?.difficulty     || 0);
         setNetworkHash(mining?.networkhashps || 0);
         setIsOnline(true);
+
+        // ── Wanderer: also check sync progress for status dot ──
+        if (appMode === MODE_WANDERER) {
+          try {
+            const chainInfo = await getBlockchainInfo(nodeConfig);
+            const progress = chainInfo?.verificationprogress || 0;
+            if (progress >= 0.95) {
+              setNodeStatus(NODE_STATUS.GREEN);
+            } else {
+              setNodeStatus(NODE_STATUS.AMBER);
+            }
+          } catch {
+            // getblockchaininfo failed — node up but chain info unavailable
+            setNodeStatus(NODE_STATUS.AMBER);
+          }
+        } else {
+          // Drifter — online = green
+          setNodeStatus(NODE_STATUS.GREEN);
+        }
+
       } catch {
         setIsOnline(false);
+        setNodeStatus(NODE_STATUS.RED);
       }
     };
+
     poll();
     const id = setInterval(poll, 30000);
     return () => clearInterval(id);
   }, [nodeConfig, configReady, appMode]);
 
-  // ── Formatters ─────────────────────────────────────────────
+  // ── Formatters ─────────────────────────────────────────
   const formatHash = (hs) => {
     if (!hs || hs === 0) return '-- H/s';
     if (hs >= 1e9) return `${(hs / 1e9).toFixed(2)} GH/s`;
@@ -125,7 +214,11 @@ export default function App() {
     return d.toFixed(3);
   };
 
-  const statusColor = isOnline ? Colors.green : Colors.amber;
+  // ── Node status dot color ──────────────────────────────
+  const statusColor =
+    nodeStatus === NODE_STATUS.GREEN ? Colors.green :
+    nodeStatus === NODE_STATUS.AMBER ? Colors.amber :
+    Colors.red;
 
   const tickerSegment = `◈ NET ${formatHash(networkHash)}--DIFF ${formatDiff(difficulty)}--BLK #${blockHeight}---STAY VIGILANT · STAY SAFE · STACK CAPS---`;
   const TICKER_SCROLL = tickerSegment.length * 10.0;
@@ -140,7 +233,7 @@ export default function App() {
     }).start();
   }, [networkHash, difficulty, blockHeight]);
 
-  // ── Mode not yet chosen — show selector ───────────────────
+  // ── Mode not yet chosen ────────────────────────────────
   if (configReady && appMode === null) {
     return (
       <SafeAreaProvider>
@@ -152,6 +245,7 @@ export default function App() {
     );
   }
 
+  // ── Main app — loads immediately regardless of mode ────
   return (
     <SafeAreaProvider>
       <NavigationContainer>
@@ -168,6 +262,7 @@ export default function App() {
                 style={styles.statusRow}
                 onPress={() => setShowSetup(true)}
               >
+                {/* ☢ icon color = RED/AMBER/GREEN based on node sync status */}
                 <Text style={[styles.statusIcon, { color: statusColor }]}>☢</Text>
                 <Text style={[
                   styles.modeText,
@@ -235,7 +330,15 @@ export default function App() {
               })}
             >
               <Tab.Screen name="VAULT">
-                {() => <WalletScreen nodeConfig={nodeConfig} isOnline={isOnline} />}
+                {() => (
+                  <WalletScreen
+                    nodeConfig={nodeConfig}
+                    isOnline={isOnline}
+                    appMode={appMode}
+                    walletReady={walletReady || appMode === MODE_DRIFTER}
+                    wandererAddress={walletAddress}
+                  />
+                )}
               </Tab.Screen>
               <Tab.Screen name="P.B.G.">
                 {() => (
@@ -287,42 +390,86 @@ const styles = StyleSheet.create({
   container:     { flex: 1, backgroundColor: Colors.black },
   initContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.black },
   initText:      { fontFamily: 'ShareTechMono', fontSize: 14, color: Colors.green, letterSpacing: 3 },
+
+  // ── Header ──
   header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10,
-    borderBottomWidth: 1, borderBottomColor: Colors.borderDim,
-    backgroundColor: Colors.surfaceLight,
+    flexDirection:     'row',
+    justifyContent:    'space-between',
+    alignItems:        'center',
+    paddingHorizontal: 16,
+    paddingTop:        10,
+    paddingBottom:     10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.borderDim,
+    backgroundColor:   Colors.surfaceLight,
   },
   logoBlock:   { flexDirection: 'column' },
   logo: {
-    fontFamily: 'ShareTechMono', fontSize: 38, color: Colors.green,
-    textShadowColor: Colors.green, textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 10, letterSpacing: 4, lineHeight: 44,
+    fontFamily:       'ShareTechMono',
+    fontSize:         38,
+    color:            Colors.green,
+    textShadowColor:  Colors.green,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
+    letterSpacing:    4,
+    lineHeight:       44,
   },
-  logoSub:     { fontFamily: 'ShareTechMono', fontSize: 13, letterSpacing: 2, marginTop: 1 },
   headerRight: { alignItems: 'flex-end', gap: 8 },
   statusRow:   { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusIcon:  { fontSize: 20 },
   modeText: {
-    fontFamily: 'ShareTechMono', fontSize: 22, letterSpacing: 3,
-    textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 8,
+    fontFamily:       'ShareTechMono',
+    fontSize:         22,
+    letterSpacing:    3,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
   },
   manualBtn: {
-    borderWidth: 1, borderColor: Colors.borderDim,
-    paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth:       1,
+    borderColor:       Colors.borderDim,
+    paddingHorizontal: 10,
+    paddingVertical:   5,
   },
-  manualBtnText: { fontFamily: 'ShareTechMono', fontSize: 13, color: Colors.greenDim, letterSpacing: 2 },
+  manualBtnText: {
+    fontFamily:    'ShareTechMono',
+    fontSize:      13,
+    color:         Colors.greenDim,
+    letterSpacing: 2,
+  },
+
+  // ── Ticker ──
   ticker: {
-    backgroundColor: '#1a0500', borderTopWidth: 1, borderTopColor: '#3a0a00',
-    borderBottomWidth: 1, borderBottomColor: '#3a0a00', height: 26, overflow: 'hidden',
+    backgroundColor:   '#1a0500',
+    borderTopWidth:    1,
+    borderTopColor:    '#3a0a00',
+    borderBottomWidth: 1,
+    borderBottomColor: '#3a0a00',
+    height:            26,
+    overflow:          'hidden',
   },
   tickerText: {
-    fontFamily: 'ShareTechMono', fontSize: 12, color: Colors.amber,
-    letterSpacing: 1, lineHeight: 26, position: 'absolute', top: 0, width: 2000,
+    fontFamily:    'ShareTechMono',
+    fontSize:      12,
+    color:         Colors.amber,
+    letterSpacing: 1,
+    lineHeight:    26,
+    position:      'absolute',
+    top:           0,
+    width:         2000,
   },
+
+  // ── Tab bar ──
   tabBar: {
-    backgroundColor: Colors.surfaceLight, borderTopWidth: 1,
-    borderTopColor: Colors.borderDim, paddingTop: 4, height: 64,
+    backgroundColor: Colors.surfaceLight,
+    borderTopWidth:  1,
+    borderTopColor:  Colors.borderDim,
+    paddingTop:      4,
+    height:          64,
   },
-  tabLabel: { fontFamily: 'ShareTechMono', fontSize: 10, letterSpacing: 1, marginBottom: 2 },
+  tabLabel: {
+    fontFamily:    'ShareTechMono',
+    fontSize:      10,
+    letterSpacing: 1,
+    marginBottom:  2,
+  },
 });
