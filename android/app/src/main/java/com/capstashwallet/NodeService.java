@@ -90,6 +90,7 @@ public class NodeService extends Service {
                 "-dbcache=64",     // limit RAM usage on mobile
                 "-par=2",          // limit CPU threads
                 "-prune=550",      // prune to 550MB to save storage
+                "-wallet=wanderer", // auto-load wanderer wallet on start
             };
 
             Log.i(TAG, "Starting CapStashd: " + daemonFile.getAbsolutePath());
@@ -178,7 +179,8 @@ public class NodeService extends Service {
             "maxconnections=8\n" +
             "dbcache=64\n" +
             "par=2\n" +
-            "prune=550\n";
+            "prune=550\n" +
+            "wallet=wanderer\n";
 
         try (FileOutputStream fos = new FileOutputStream(confFile)) {
             fos.write(conf.getBytes());

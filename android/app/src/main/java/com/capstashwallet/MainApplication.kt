@@ -20,6 +20,7 @@ class MainApplication : Application(), ReactApplication {
         override fun getPackages(): List<ReactPackage> {
   val packages = PackageList(this).packages
   packages.add(NodePackage())
+  packages.add(MinerPackage())
   return packages
 }
 
