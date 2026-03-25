@@ -79,6 +79,18 @@ void whirlpool512(const uint8_t *data, size_t len, uint8_t *digest);
  */
 void capstash_hash(const uint8_t *header, uint8_t *out);
 
+// Midstate API — call once per template, then use capstash_hash_midstate per nonce
+void capstash_compute_midstate(const uint8_t *header,
+                                uint64_t midstate[8],
+                                uint64_t *tail0,
+                                uint64_t *tail1_base);
+
+int capstash_hash_midstate(const uint64_t midstate[8],
+                            uint64_t tail0,
+                            uint64_t tail1_base,
+                            uint32_t nonce,
+                            const uint64_t target[4]);
+
 /**
  * capstash_hash_meets_target — check if PoW hash beats target
  * Compares 32-byte hash against 32-byte target (big-endian, leading zeros)
