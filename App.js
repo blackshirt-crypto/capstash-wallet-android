@@ -1,4 +1,4 @@
-// App.js
+// App.js v2.5
 // CapStash Wallet — Wallet of the Wasteland
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -8,16 +8,22 @@ import {
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import WalletScreen   from './screens/WalletScreen';
-import MinerScreen    from './screens/MinerScreen';
-import ExplorerScreen from './screens/ExplorerScreen';
-import NetworkScreen  from './screens/NetworkScreen';
-import SoloScreen     from './screens/SoloScreen';
-import FieldManual    from './components/FieldManual';
-import SetupMenu      from './components/Setupmenu';
-import { getBlockCount, getMiningInfo, loadAppMode, loadNodeConfig } from './services/rpc';
-import Colors    from './theme/colors';
-import Typography from './theme/typography';
+import WalletScreen     from './screens/WalletScreen';
+import MinerScreen      from './screens/MinerScreen';
+import ExplorerScreen   from './screens/ExplorerScreen';
+import NetworkScreen    from './screens/NetworkScreen';
+import SoloScreen       from './screens/SoloScreen';
+import ModeSelectScreen from './screens/ModeSelectScreen';
+import FieldManual      from './components/FieldManual';
+import SetupMenu        from './components/Setupmenu';
+import { getBlockCount, getMiningInfo, getBlockchainInfo, loadNodeConfig } from './services/rpc';
+import {
+  setAppMode as persistMode, clearAppMode, loadAppMode,
+  MODE_WANDERER, MODE_DRIFTER, WANDERER_NODE_CONFIG,
+} from './services/appMode';
+import { ensureWandererWallet } from './services/walletManager';
+import { startNode } from './services/nodeService';
+import Colors from './theme/colors';
 
 const Tab = createBottomTabNavigator();
 
@@ -28,6 +34,16 @@ const DEFAULT_NODE = {
   rpcpassword: 'wasteland',
 };
 
+// ── Node sync status for header indicator ─────────────────
+// RED   = node not running / no connection
+// AMBER = connected but still syncing (verificationprogress < 0.95)
+// GREEN = fully synced (verificationprogress >= 0.95)
+const NODE_STATUS = {
+  RED:   'red',
+  AMBER: 'amber',
+  GREEN: 'green',
+};
+
 export default function App() {
   const [blockHeight, setBlockHeight] = useState(0);
   const [networkHash, setNetworkHash] = useState(0);
@@ -35,34 +51,111 @@ export default function App() {
   const [isOnline,    setIsOnline]    = useState(true);
   const [showManual,  setShowManual]  = useState(false);
   const [showSetup,   setShowSetup]   = useState(false);
-  const [nodeConfig,  setNodeConfig]  = useState(null);
-  const [appMode,     setAppMode]     = useState('DRIFTER');
+  const [nodeConfig,  setNodeConfig]  = useState(DEFAULT_NODE);
+  const [appMode,     setAppMode]     = useState(null);
   const [configReady, setConfigReady] = useState(false);
+
+  // ── Wanderer wallet state ──────────────────────────────
+  const [walletAddress, setWalletAddress] = useState(null);
+  const [walletReady,   setWalletReady]   = useState(false);
+
+  // ── Node sync status — drives ☢ icon color ────────────
+  const [nodeStatus, setNodeStatus] = useState(NODE_STATUS.RED);
 
   const tickerAnim = useRef(new Animated.Value(0)).current;
 
-  // ── Load persisted app mode on boot ───────────────────────
+  // ── Load persisted app mode on boot ───────────────────
   useEffect(() => {
     loadAppMode().then(m => {
-      if (!m) return;
-      if (m === 'connected'  || m === 'DRIFTER')  { setAppMode('DRIFTER');  return; }
-      if (m === 'standalone' || m === 'WANDERER') { setAppMode('WANDERER'); return; }
-      setAppMode('DRIFTER');
+      console.log('[App] loadAppMode returned:', JSON.stringify(m));
+      if (!m) { setAppMode(null); return; }
+      if (m === 'connected' || m === 'standalone') {
+        clearAppMode().then(() => setAppMode(null));
+        return;
+      }
+      if (m === MODE_DRIFTER)  { setAppMode(MODE_DRIFTER);  return; }
+      if (m === MODE_WANDERER) { setAppMode(MODE_WANDERER); return; }
+      setAppMode(null);
     });
   }, []);
 
-  // ── Load persisted node config on boot ────────────────────
+  // ── Load persisted node config on boot ────────────────
   useEffect(() => {
     loadNodeConfig().then(cfg => {
-      if (cfg) setNodeConfig(cfg);
+      if (cfg && typeof cfg === 'object') setNodeConfig(cfg);
       else setNodeConfig(DEFAULT_NODE);
       setConfigReady(true);
     });
   }, []);
 
-  // ── Poll node stats ────────────────────────────────────────
+  // ── Wanderer mode — override nodeConfig to localhost ──
   useEffect(() => {
-    if (!configReady || !nodeConfig) return;
+    if (!appMode) return;
+    if (appMode === MODE_WANDERER) {
+      setNodeConfig({
+        ip:           WANDERER_NODE_CONFIG.host,
+        port:         String(WANDERER_NODE_CONFIG.port),
+        rpcuser:      WANDERER_NODE_CONFIG.user,
+        rpcpassword:  WANDERER_NODE_CONFIG.pass,
+        wandererMode: true,
+      });
+    }
+  }, [appMode]);
+
+  // ── Wanderer boot — start node then init wallet ────────
+  // Does NOT block the UI. Wallet screen loads immediately.
+  // ensureWandererWallet runs after a 5s delay to give capstashd time to start.
+  useEffect(() => {
+    if (appMode !== MODE_WANDERER || !configReady) return;
+
+    const wandererCfg = {
+      ip:           WANDERER_NODE_CONFIG.host,
+      port:         String(WANDERER_NODE_CONFIG.port),
+      rpcuser:      WANDERER_NODE_CONFIG.user,
+      rpcpassword:  WANDERER_NODE_CONFIG.pass,
+      wandererMode: true,
+    };
+
+    console.log('[App] Wanderer boot — starting node...');
+
+    // Start capstashd, wait 5s, then attempt wallet init
+    startNode()
+      .catch(e => console.warn('[App] startNode error:', e.message))
+      .then(() => new Promise(resolve => setTimeout(resolve, 5000)))
+      .then(() => ensureWandererWallet(wandererCfg))
+      .then(result => {
+        console.log('[App] ensureWandererWallet result:', JSON.stringify(result));
+        if (result.ready) {
+          setWalletAddress(result.address);
+          setWalletReady(true);
+        } else {
+          // Wallet init failed — not fatal, user can still see the screen.
+          // Node status indicator will show RED until node comes up.
+          console.warn('[App] Wallet init failed:', result.error);
+        }
+      })
+      .catch(e => console.error('[App] Wanderer boot error:', e.message));
+
+  }, [appMode, configReady]);
+
+  // ── Handle mode selection ──────────────────────────────
+  const handleModeSelected = async (mode) => {
+    await persistMode(mode);
+    if (mode === MODE_DRIFTER) {
+      setWalletAddress(null);
+      setWalletReady(false);
+      setNodeStatus(NODE_STATUS.RED);
+      const cfg = await loadNodeConfig();
+      if (cfg && !cfg.wandererMode) setNodeConfig(cfg);
+      else setNodeConfig(DEFAULT_NODE);
+    }
+    setAppMode(mode);
+  };
+
+  // ── Poll node stats ────────────────────────────────────
+  useEffect(() => {
+    if (!configReady || !nodeConfig || !appMode) return;
+
     const poll = async () => {
       try {
         const [h, mining] = await Promise.all([
@@ -73,16 +166,38 @@ export default function App() {
         setDifficulty(mining?.difficulty     || 0);
         setNetworkHash(mining?.networkhashps || 0);
         setIsOnline(true);
+
+        // ── Wanderer: also check sync progress for status dot ──
+        if (appMode === MODE_WANDERER) {
+          try {
+            const chainInfo = await getBlockchainInfo(nodeConfig);
+            const progress = chainInfo?.verificationprogress || 0;
+            if (progress >= 0.95) {
+              setNodeStatus(NODE_STATUS.GREEN);
+            } else {
+              setNodeStatus(NODE_STATUS.AMBER);
+            }
+          } catch {
+            // getblockchaininfo failed — node up but chain info unavailable
+            setNodeStatus(NODE_STATUS.AMBER);
+          }
+        } else {
+          // Drifter — online = green
+          setNodeStatus(NODE_STATUS.GREEN);
+        }
+
       } catch {
         setIsOnline(false);
+        setNodeStatus(NODE_STATUS.RED);
       }
     };
+
     poll();
     const id = setInterval(poll, 30000);
     return () => clearInterval(id);
-  }, [nodeConfig, configReady]);
+  }, [nodeConfig, configReady, appMode]);
 
-  // ── Formatters ─────────────────────────────────────────────
+  // ── Formatters ─────────────────────────────────────────
   const formatHash = (hs) => {
     if (!hs || hs === 0) return '-- H/s';
     if (hs >= 1e9) return `${(hs / 1e9).toFixed(2)} GH/s`;
@@ -99,13 +214,15 @@ export default function App() {
     return d.toFixed(3);
   };
 
-  const statusColor = isOnline ? Colors.green : Colors.amber;
+  // ── Node status dot color ──────────────────────────────
+  const statusColor =
+    nodeStatus === NODE_STATUS.GREEN ? Colors.green :
+    nodeStatus === NODE_STATUS.AMBER ? Colors.amber :
+    Colors.red;
 
-  // Ticker — scrolls from right edge across screen, resets on data refresh
   const tickerSegment = `◈ NET ${formatHash(networkHash)}--DIFF ${formatDiff(difficulty)}--BLK #${blockHeight}---STAY VIGILANT · STAY SAFE · STACK CAPS---`;
   const TICKER_SCROLL = tickerSegment.length * 10.0;
 
-  // Reset and restart ticker on every data update
   useEffect(() => {
     tickerAnim.setValue(0);
     Animated.timing(tickerAnim, {
@@ -116,6 +233,19 @@ export default function App() {
     }).start();
   }, [networkHash, difficulty, blockHeight]);
 
+  // ── Mode not yet chosen ────────────────────────────────
+  if (configReady && appMode === null) {
+    return (
+      <SafeAreaProvider>
+        <NavigationContainer>
+          <StatusBar barStyle="dark-content" backgroundColor={Colors.black} />
+          <ModeSelectScreen onModeSelected={handleModeSelected} />
+        </NavigationContainer>
+      </SafeAreaProvider>
+    );
+  }
+
+  // ── Main app — loads immediately regardless of mode ────
   return (
     <SafeAreaProvider>
       <NavigationContainer>
@@ -124,24 +254,21 @@ export default function App() {
 
           {/* ── App Header ── */}
           <View style={styles.header}>
-
-            {/* Left — logo */}
             <View style={styles.logoBlock}>
               <Text style={styles.logo}>CapStash</Text>
             </View>
-
-            {/* Right — mode indicator + B.S.G. */}
             <View style={styles.headerRight}>
               <TouchableOpacity
                 style={styles.statusRow}
                 onPress={() => setShowSetup(true)}
               >
+                {/* ☢ icon color = RED/AMBER/GREEN based on node sync status */}
                 <Text style={[styles.statusIcon, { color: statusColor }]}>☢</Text>
                 <Text style={[
                   styles.modeText,
                   { color: statusColor, textShadowColor: statusColor },
                 ]}>
-                  {appMode}
+                  {appMode || 'DRIFTER'}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.manualBtn} onPress={() => setShowManual(true)}>
@@ -203,16 +330,35 @@ export default function App() {
               })}
             >
               <Tab.Screen name="VAULT">
-                {() => <WalletScreen nodeConfig={nodeConfig} isOnline={isOnline} />}
+                {() => (
+                  <WalletScreen
+                    nodeConfig={nodeConfig}
+                    isOnline={isOnline}
+                    appMode={appMode}
+                    walletReady={walletReady || appMode === MODE_DRIFTER}
+                    wandererAddress={walletAddress}
+                  />
+                )}
               </Tab.Screen>
               <Tab.Screen name="P.B.G.">
-                {() => <MinerScreen nodeConfig={nodeConfig} isOnline={isOnline} />}
+                {() => (
+                  <MinerScreen
+                    nodeConfig={nodeConfig}
+                    isOnline={isOnline}
+                    appMode={appMode}
+                  />
+                )}
               </Tab.Screen>
               <Tab.Screen name="B.D.T.">
                 {() => <ExplorerScreen nodeConfig={nodeConfig} />}
               </Tab.Screen>
               <Tab.Screen name="SIGNAL">
-                {() => <NetworkScreen nodeConfig={nodeConfig} />}
+                {() => (
+                  <NetworkScreen
+                    nodeConfig={nodeConfig}
+                    appMode={appMode}
+                  />
+                )}
               </Tab.Screen>
               <Tab.Screen name="SURVIVOR">
                 {() => <SoloScreen nodeConfig={nodeConfig} />}
@@ -230,9 +376,9 @@ export default function App() {
           nodeConfig={nodeConfig}
           appMode={appMode}
           onNodeConfigChange={setNodeConfig}
+          onModeChange={handleModeSelected}
         />
 
-        {/* ── Banjo's Survival Guide ── */}
         <FieldManual visible={showManual} onClose={() => setShowManual(false)} />
 
       </NavigationContainer>
@@ -241,26 +387,11 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex:            1,
-    backgroundColor: Colors.black,
-  },
+  container:     { flex: 1, backgroundColor: Colors.black },
+  initContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.black },
+  initText:      { fontFamily: 'ShareTechMono', fontSize: 14, color: Colors.green, letterSpacing: 3 },
 
-  // ── Init screen ─────────────────────────────────────────────
-  initContainer: {
-    flex:            1,
-    justifyContent:  'center',
-    alignItems:      'center',
-    backgroundColor: Colors.black,
-  },
-  initText: {
-    fontFamily:    'ShareTechMono',
-    fontSize:      14,
-    color:         Colors.green,
-    letterSpacing: 3,
-  },
-
-  // ── Header ──────────────────────────────────────────────────
+  // ── Header ──
   header: {
     flexDirection:     'row',
     justifyContent:    'space-between',
@@ -272,9 +403,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.borderDim,
     backgroundColor:   Colors.surfaceLight,
   },
-  logoBlock: {
-    flexDirection: 'column',
-  },
+  logoBlock:   { flexDirection: 'column' },
   logo: {
     fontFamily:       'ShareTechMono',
     fontSize:         38,
@@ -285,24 +414,9 @@ const styles = StyleSheet.create({
     letterSpacing:    4,
     lineHeight:       44,
   },
-  logoSub: {
-    fontFamily:    'ShareTechMono',
-    fontSize:      13,
-    letterSpacing: 2,
-    marginTop:     1,
-  },
-  headerRight: {
-    alignItems: 'flex-end',
-    gap:        8,
-  },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           6,
-  },
-  statusIcon: {
-    fontSize: 20,
-  },
+  headerRight: { alignItems: 'flex-end', gap: 8 },
+  statusRow:   { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statusIcon:  { fontSize: 20 },
   modeText: {
     fontFamily:       'ShareTechMono',
     fontSize:         22,
@@ -323,7 +437,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
 
-  // ── Ticker ──────────────────────────────────────────────────
+  // ── Ticker ──
   ticker: {
     backgroundColor:   '#1a0500',
     borderTopWidth:    1,
@@ -344,7 +458,7 @@ const styles = StyleSheet.create({
     width:         2000,
   },
 
-  // ── Tabs ────────────────────────────────────────────────────
+  // ── Tab bar ──
   tabBar: {
     backgroundColor: Colors.surfaceLight,
     borderTopWidth:  1,

@@ -1,5 +1,12 @@
 // screens/WalletScreen.js
 // W.O.W. — Wallet tab: balance, identity, send/receive, transactions
+//
+// Props:
+//   nodeConfig      {object}  — current RPC config (wandererMode: true if Wanderer)
+//   isOnline        {bool}
+//   appMode         {string}  — 'drifter' | 'wanderer'
+//   walletReady     {bool}    — false until Wanderer wallet is confirmed
+//   wandererAddress {string}  — pre-loaded Wanderer wallet address from App.js
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -11,33 +18,36 @@ import { Camera, useCameraDevice, useCodeScanner, useCameraPermission } from 're
 import QRCode from 'react-native-qrcode-svg';
 import TierName  from '../components/TierName';
 import { getBalances, listTransactions, getWalletAddresses, sendToAddress } from '../services/rpc';
+import { MODE_WANDERER } from '../services/appMode';
 import Colors    from '../theme/colors';
 import Typography from '../theme/typography';
 
 const TX_INITIAL = 5;
 const TX_FULL    = 20;
 
-export default function WalletScreen({ nodeConfig }) {
+export default function WalletScreen({ nodeConfig, isOnline, appMode, walletReady, wandererAddress }) {
+  const isWanderer = appMode === MODE_WANDERER;
+
   const [balance,      setBalance]      = useState(null);
   const [txs,          setTxs]          = useState([]);
-  const [myAddress,    setMyAddress]    = useState(null);
+  const [myAddress,    setMyAddress]    = useState(wandererAddress || null);
   const [allAddresses, setAllAddresses] = useState([]);
   const [refreshing,   setRefreshing]   = useState(false);
   const [showAllTx,    setShowAllTx]    = useState(false);
   const [balanceHidden,setBalanceHidden]= useState(false);
 
-  // ── Receive modal ───────────────────────────────────────────
+  // ── Receive modal ───────────────────────────────────────
   const [showReceive, setShowReceive] = useState(false);
   const [copied,      setCopied]      = useState(false);
 
-  // ── Send modal ──────────────────────────────────────────────
+  // ── Send modal ──────────────────────────────────────────
   const [showSend,     setShowSend]     = useState(false);
   const [sendAddress,  setSendAddress]  = useState('');
   const [sendAmount,   setSendAmount]   = useState('');
-  const [sendStep,     setSendStep]     = useState('address'); // 'address' | 'amount' | 'confirm'
+  const [sendStep,     setSendStep]     = useState('address');
   const [sending,      setSending]      = useState(false);
 
-  // ── Camera / scan ───────────────────────────────────────────
+  // ── Camera / scan ───────────────────────────────────────
   const [showScan,  setShowScan]  = useState(false);
   const scanned = useRef(false);
   const device  = useCameraDevice('back');
@@ -58,22 +68,36 @@ export default function WalletScreen({ nodeConfig }) {
     },
   });
 
-  // ── Load ────────────────────────────────────────────────────
+  // ── Seed wandererAddress into state when it arrives ─────
+  useEffect(() => {
+    if (wandererAddress && !myAddress) {
+      setMyAddress(wandererAddress);
+    }
+  }, [wandererAddress]);
+
+  // ── Load ────────────────────────────────────────────────
   const load = useCallback(async () => {
+    if (!walletReady) return;
     try {
       const bal = await getBalances(nodeConfig);
       setBalance(bal?.mine?.trusted ?? 0);
+
       const transactions = await listTransactions(nodeConfig, TX_FULL);
       setTxs(transactions || []);
+
       const addresses = await getWalletAddresses(nodeConfig);
       if (addresses && addresses.length > 0) {
         setMyAddress(addresses[0].address);
         setAllAddresses(addresses);
+      } else if (isWanderer && wandererAddress) {
+        // Wanderer wallet exists but no received txs yet — use the known address
+        setMyAddress(wandererAddress);
+        setAllAddresses([{ address: wandererAddress, label: 'WANDERER' }]);
       }
     } catch (e) {
       console.warn('WalletScreen load error:', e);
     }
-  }, [nodeConfig]);
+  }, [nodeConfig, walletReady, isWanderer, wandererAddress]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -87,7 +111,7 @@ export default function WalletScreen({ nodeConfig }) {
     setRefreshing(false);
   };
 
-  // ── Camera permission ───────────────────────────────────────
+  // ── Camera permission ───────────────────────────────────
   const openCamera = async () => {
     if (!hasPermission) {
       const granted = await requestPermission();
@@ -103,7 +127,7 @@ export default function WalletScreen({ nodeConfig }) {
     setShowScan(true);
   };
 
-  // ── Send handlers ───────────────────────────────────────────
+  // ── Send handlers ───────────────────────────────────────
   const handleOpenSend = () => {
     setSendAddress('');
     setSendAmount('');
@@ -126,33 +150,30 @@ export default function WalletScreen({ nodeConfig }) {
     setSendStep('confirm');
   };
 
-const handleExecuteSend = async () => {
+  const handleExecuteSend = async () => {
     setSending(true);
-    console.log('SEND:', sendAddress, parseFloat(sendAmount), nodeConfig);
-try {
-  console.log('[SEND] nodeConfig received by WalletScreen:', JSON.stringify(nodeConfig));
-  console.log('[SEND] cachedConfig check — firing sendToAddress now');
-  const cleanAddr = sendAddress.startsWith('CAP1') ? sendAddress.toLowerCase() : sendAddress;
-  const result = await sendToAddress(nodeConfig, cleanAddr, parseFloat(sendAmount));
-  console.log('SEND RESULT:', result);
-  Alert.alert('✓ Sent', `${sendAmount} CAP sent to ${sendAddress.slice(0,10)}...`);
-  setShowSend(false);
-  load();
-} catch (e) {
-  Alert.alert('Send Failed', e.message || 'Transaction failed. Check node connection.');
-} finally {
-  setSending(false);
-}
+    try {
+      const cleanAddr = sendAddress.startsWith('CAP1') ? sendAddress.toLowerCase() : sendAddress;
+      const result = await sendToAddress(nodeConfig, cleanAddr, parseFloat(sendAmount));
+      console.log('SEND RESULT:', result);
+      Alert.alert('✓ Sent', `${sendAmount} CAP sent to ${sendAddress.slice(0,10)}...`);
+      setShowSend(false);
+      load();
+    } catch (e) {
+      Alert.alert('Send Failed', e.message || 'Transaction failed. Check node connection.');
+    } finally {
+      setSending(false);
+    }
   };
 
-  // ── Copy ────────────────────────────────────────────────────
+  // ── Copy ────────────────────────────────────────────────
   const handleCopy = (addr) => {
     Clipboard.setString(addr || myAddress || '');
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // ── Formatters ──────────────────────────────────────────────
+  // ── Formatters ──────────────────────────────────────────
   const formatTime = (timestamp) => {
     const diff = Math.floor(Date.now() / 1000 - timestamp);
     if (diff < 60)    return `${diff}S AGO`;
@@ -163,7 +184,6 @@ try {
 
   const maskAddr = (addr) => addr ? `${addr.slice(0,8)}...${addr.slice(-6)}` : '—';
 
-  // Recent unique sent addresses from tx history
   const recentSentAddresses = [...new Set(
     txs
       .filter(tx => tx.category === 'send' && tx.address)
@@ -171,6 +191,17 @@ try {
   )].slice(0, 5);
 
   const displayedTxs = showAllTx ? txs : txs.slice(0, TX_INITIAL);
+
+  // ── Not ready guard — should not normally be seen ───────
+  // (App.js shows WandererInitScreen before tabs render in Wanderer)
+  // This is a defensive fallback only.
+  if (!walletReady) {
+    return (
+      <View style={styles.notReadyContainer}>
+        <Text style={styles.notReadyText}>◈ WALLET LOADING...</Text>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -181,6 +212,13 @@ try {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.green} />
         }
       >
+        {/* ── Mode badge (Wanderer only) ── */}
+        {isWanderer && (
+          <View style={styles.modeBadge}>
+            <Text style={styles.modeBadgeText}>◈ LOCAL WALLET · WANDERER MODE</Text>
+          </View>
+        )}
+
         {/* ── Balance card ── */}
         <View style={styles.balanceCard}>
           <View style={styles.balanceLabelRow}>
@@ -211,7 +249,6 @@ try {
 
           <Text style={styles.preWarText}>~ pre "great war" value unknown</Text>
 
-          {/* ── Two buttons ── */}
           <View style={styles.actionRow}>
             <TouchableOpacity
               style={[styles.actionBtn, styles.primaryBtn]}
@@ -231,7 +268,11 @@ try {
         {/* ── Transactions ── */}
         <Text style={styles.sectionHeader}>▸ RECENT TRANSACTIONS</Text>
         {txs.length === 0 && (
-          <Text style={styles.emptyText}>NO TRANSACTIONS FOUND</Text>
+          <Text style={styles.emptyText}>
+            {isWanderer
+              ? 'NO TRANSACTIONS YET · MINE OR RECEIVE CAPS TO BEGIN'
+              : 'NO TRANSACTIONS FOUND'}
+          </Text>
         )}
         {displayedTxs.map((tx, i) => {
           const isReceived = tx.category === 'immature' || tx.category === 'receive';
@@ -287,7 +328,6 @@ try {
           <ScrollView contentContainerStyle={styles.modalContent}>
             <Text style={styles.receiveHint}>SHARE THIS ADDRESS TO RECEIVE CAPS</Text>
 
-            {/* QR Code */}
             <View style={styles.qrPlaceholder}>
               {myAddress ? (
                 <QRCode
@@ -304,7 +344,6 @@ try {
               )}
             </View>
 
-            {/* Address */}
             <View style={styles.addressBox}>
               <Text style={styles.addressBoxText} selectable>{myAddress || '—'}</Text>
             </View>
@@ -349,18 +388,15 @@ try {
             </TouchableOpacity>
           </View>
 
-          {/* ── Step: Address selection ── */}
           {sendStep === 'address' && (
             <ScrollView contentContainerStyle={styles.modalContent}>
               <Text style={styles.sendStepLabel}>SELECT DESTINATION</Text>
 
-              {/* Scan new */}
               <TouchableOpacity style={styles.scanNewBtn} onPress={openCamera}>
                 <Text style={styles.scanNewIcon}>⊡</Text>
                 <Text style={styles.scanNewText}>SCAN NEW ADDRESS</Text>
               </TouchableOpacity>
 
-              {/* Manual entry */}
               <View style={styles.manualEntryCard}>
                 <Text style={styles.inputLabel}>OR ENTER ADDRESS MANUALLY</Text>
                 <TextInput
@@ -382,7 +418,6 @@ try {
                 )}
               </View>
 
-              {/* Recent addresses */}
               {recentSentAddresses.length > 0 && (
                 <>
                   <Text style={styles.recentHeader}>RECENT</Text>
@@ -399,7 +434,6 @@ try {
                 </>
               )}
 
-              {/* Own addresses */}
               <Text style={styles.recentHeader}>MY ADDRESSES</Text>
               {allAddresses.map((a, i) => (
                 <TouchableOpacity
@@ -417,7 +451,6 @@ try {
             </ScrollView>
           )}
 
-          {/* ── Step: Amount entry ── */}
           {sendStep === 'amount' && (
             <View style={styles.modalContent}>
               <Text style={styles.sendStepLabel}>ENTER AMOUNT</Text>
@@ -461,7 +494,6 @@ try {
             </View>
           )}
 
-          {/* ── Step: Confirm ── */}
           {sendStep === 'confirm' && (
             <View style={styles.modalContent}>
               <Text style={styles.sendStepLabel}>CONFIRM TRANSACTION</Text>
@@ -544,9 +576,30 @@ try {
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────
+// ── Styles ─────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.black, padding: 14 },
+
+  notReadyContainer: {
+    flex: 1, backgroundColor: Colors.black,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  notReadyText: {
+    fontFamily: 'ShareTechMono', fontSize: 13,
+    color: Colors.greenDim, letterSpacing: 3,
+  },
+
+  // Mode badge
+  modeBadge: {
+    borderWidth: 1, borderColor: Colors.amberDim,
+    paddingVertical: 6, paddingHorizontal: 10,
+    marginBottom: 12, alignItems: 'center',
+    backgroundColor: Colors.surface,
+  },
+  modeBadgeText: {
+    fontFamily: 'ShareTechMono', fontSize: 10,
+    color: Colors.amber, letterSpacing: 2,
+  },
 
   // Balance card
   balanceCard: {
@@ -591,7 +644,6 @@ const styles = StyleSheet.create({
     marginTop: 12, fontStyle: 'italic', opacity: 0.6, textAlign: 'center',
   },
 
-  // Action buttons
   actionRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
   actionBtn: {
     flex: 1, paddingVertical: 12,
@@ -638,9 +690,7 @@ const styles = StyleSheet.create({
     fontFamily: 'ShareTechMono', fontSize: 10,
     color: Colors.greenDim, opacity: 0.7,
   },
-  txAmount: {
-    fontFamily: 'ShareTechMono', fontSize: 14,
-  },
+  txAmount: { fontFamily: 'ShareTechMono', fontSize: 14 },
   showMoreBtn: {
     borderWidth: 1, borderColor: Colors.border,
     paddingVertical: 12, alignItems: 'center', marginBottom: 8,
@@ -761,7 +811,6 @@ const styles = StyleSheet.create({
   recentAddrText: { fontFamily: 'ShareTechMono', fontSize: 12, color: Colors.green },
   recentAddrArrow: { fontFamily: 'ShareTechMono', fontSize: 16, color: Colors.greenDim },
 
-  // Amount step
   sendToCard: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     borderWidth: 1, borderColor: Colors.border,
@@ -800,8 +849,6 @@ const styles = StyleSheet.create({
     fontFamily: 'ShareTechMono', fontSize: 14,
     color: Colors.green, letterSpacing: 2,
   },
-
-  // Confirm step
   confirmCard: {
     borderWidth: 1, borderColor: Colors.border,
     backgroundColor: Colors.surface, marginBottom: 24,

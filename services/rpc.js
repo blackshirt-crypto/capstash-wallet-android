@@ -1,13 +1,5 @@
 // services/rpc.js
 // N.U.K.A — CapStash RPC Service with Encrypted Config & Dual-Mode Support
-//
-// ══════════════════════════════════════════════════════════
-// PHASE 3: Encrypted credentials, connection health, dual-mode
-//
-// Modes:
-//   MODE_CONNECTED  — Full node sync via Tailscale/LAN
-//   MODE_STANDALONE — Local mining, on-demand chain tip updates
-// ══════════════════════════════════════════════════════════
 
 import { Buffer } from 'buffer';
 import EncryptedStorage from 'react-native-encrypted-storage';
@@ -21,6 +13,9 @@ const MODE_KEY        = 'capstash_app_mode';
 export const MODE_CONNECTED  = 'connected';
 export const MODE_STANDALONE = 'standalone';
 
+// Named wallet used in Wanderer mode
+export const WANDERER_WALLET_NAME = 'wanderer';
+
 // ── In-memory cache ───────────────────────────────────────
 let _cachedConfig = null;
 let _cachedMode   = MODE_CONNECTED;
@@ -30,7 +25,7 @@ let _lastSuccessTime  = null;
 let _lastBlockHeight  = null;
 let _consecutiveFails = 0;
 
-const STALE_THRESHOLD_MS = 120000; // 2 min without successful poll = stale
+const STALE_THRESHOLD_MS = 120000;
 
 // ── Timeout-aware fetch ───────────────────────────────────
 function fetchWithTimeout(url, options) {
@@ -43,13 +38,9 @@ function fetchWithTimeout(url, options) {
 }
 
 // ══════════════════════════════════════════════════════════
-// CONFIG MANAGEMENT — Encrypted Storage
+// CONFIG MANAGEMENT
 // ══════════════════════════════════════════════════════════
 
-/**
- * Save node config to encrypted storage and update cache.
- * @param {{ ip: string, port: string, rpcuser: string, rpcpassword: string }} config
- */
 export async function saveNodeConfig(config) {
   const merged = { port: '8332', ...config };
   await EncryptedStorage.setItem(CONFIG_KEY, JSON.stringify(merged));
@@ -60,17 +51,12 @@ export async function saveNodeConfig(config) {
   return merged;
 }
 
-/**
- * Load node config from encrypted storage (or cache).
- * Returns null if nothing saved yet — triggers first-run setup.
- */
 export async function loadNodeConfig() {
   if (_cachedConfig) return _cachedConfig;
   try {
     const raw = await EncryptedStorage.getItem(CONFIG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      // trim all string fields to strip any accidental spaces
       _cachedConfig = {
         ...parsed,
         ip:          parsed.ip?.trim(),
@@ -78,7 +64,6 @@ export async function loadNodeConfig() {
         rpcuser:     parsed.rpcuser?.trim(),
         rpcpassword: parsed.rpcpassword?.trim(),
       };
-      // re-save the cleaned config
       await EncryptedStorage.setItem(CONFIG_KEY, JSON.stringify(_cachedConfig));
       return _cachedConfig;
     }
@@ -88,9 +73,6 @@ export async function loadNodeConfig() {
   return null;
 }
 
-/**
- * Clear stored config (for logout / reset).
- */
 export async function clearNodeConfig() {
   await EncryptedStorage.removeItem(CONFIG_KEY);
   _cachedConfig     = null;
@@ -99,9 +81,6 @@ export async function clearNodeConfig() {
   _lastBlockHeight  = null;
 }
 
-/**
- * Check if a config has been saved (quick check for first-run gate).
- */
 export async function hasNodeConfig() {
   if (_cachedConfig) return true;
   const raw = await EncryptedStorage.getItem(CONFIG_KEY);
@@ -168,20 +147,24 @@ function _recordFailure() {
 // ══════════════════════════════════════════════════════════
 
 /**
- * Core RPC call. Uses provided config OR falls back to cached config.
- * @param {object|null} nodeConfig — pass null to use stored/cached config
- * @param {string} method
- * @param {array}  params
+ * Core RPC call.
+ * @param {object|null} nodeConfig  — pass null to use cached config
+ * @param {string}      method
+ * @param {array}       params
+ * @param {string|null} walletName  — if set, appends /wallet/<name> to URL
+ *                                    use WANDERER_WALLET_NAME in Wanderer mode
  */
-async function rpcCall(nodeConfig, method, params = []) {
+async function rpcCall(nodeConfig, method, params = [], walletName = null) {
   if (USE_MOCK) return getMockResponse(method, params);
 
   const cfg = nodeConfig || _cachedConfig;
   if (!cfg) throw new Error('NO_CONFIG');
 
-  // ip and port are stored separately — build URL cleanly
   const { ip, port = '8332', rpcuser, rpcpassword } = cfg;
-  const url = `http://${ip}:${port}`;
+
+  // Append /wallet/<name> for named wallet calls (Wanderer mode)
+  const walletPath = walletName ? `/wallet/${walletName}` : '';
+  const url = `http://${ip}:${port}${walletPath}`;
 
   const body = JSON.stringify({
     jsonrpc: '1.0',
@@ -219,14 +202,18 @@ async function rpcCall(nodeConfig, method, params = []) {
   }
 }
 
+/**
+ * Convenience wrapper — calls rpcCall with WANDERER_WALLET_NAME baked in.
+ * Use for any wallet-scoped call in Wanderer mode.
+ */
+export async function rpcWalletCall(nodeConfig, method, params = []) {
+  return rpcCall(nodeConfig, method, params, WANDERER_WALLET_NAME);
+}
+
 // ══════════════════════════════════════════════════════════
 // CONNECTION TEST
 // ══════════════════════════════════════════════════════════
 
-/**
- * Test a config without saving it.
- * Returns { success, blockHeight, error }.
- */
 export async function testConnection(config) {
   try {
     const result = await rpcCall(config, 'getblockcount');
@@ -237,7 +224,7 @@ export async function testConnection(config) {
 }
 
 // ══════════════════════════════════════════════════════════
-// PUBLIC RPC METHODS
+// PUBLIC RPC METHODS — Node-level (no wallet scope)
 // ══════════════════════════════════════════════════════════
 
 export async function getBlockCount(nodeConfig = null) {
@@ -248,19 +235,6 @@ export async function getBlockCount(nodeConfig = null) {
 
 export async function getMiningInfo(nodeConfig = null) {
   return rpcCall(nodeConfig, 'getmininginfo');
-}
-
-export async function getBalance(nodeConfig = null) {
-  return rpcCall(nodeConfig, 'getbalance');
-}
-
-export async function getBalances(nodeConfig = null) {
-  return rpcCall(nodeConfig, 'getbalances');
-}
-
-// ← fixed: consistent lowercase 's' to match all screen imports
-export async function getNetworkHashPs(nodeConfig = null) {
-  return rpcCall(nodeConfig, 'getnetworkhashps');
 }
 
 export async function getBlockHash(nodeConfig = null, height) {
@@ -277,22 +251,6 @@ export async function getBlockTemplate(nodeConfig = null) {
 
 export async function submitBlock(nodeConfig = null, hexdata) {
   return rpcCall(nodeConfig, 'submitblock', [hexdata]);
-}
-
-export async function listTransactions(nodeConfig = null, count = 20) {
-  return rpcCall(nodeConfig, 'listtransactions', ['*', count]);
-}
-
-export async function getNewAddress(nodeConfig = null) {
-  return rpcCall(nodeConfig, 'getnewaddress');
-}
-
-export async function getWalletAddresses(nodeConfig = null) {
-  return rpcCall(nodeConfig, 'listreceivedbyaddress', [0, true]);
-}
-
-export async function listReceivedByAddress(nodeConfig = null, minConf = 0, includeEmpty = true) {
-  return rpcCall(nodeConfig, 'listreceivedbyaddress', [minConf, includeEmpty]);
 }
 
 export async function getBlockchainInfo(nodeConfig = null) {
@@ -319,12 +277,76 @@ export async function getDifficulty(nodeConfig = null) {
   return rpcCall(nodeConfig, 'getdifficulty');
 }
 
-export async function sendToAddress(nodeConfig = null, address, amount) {
-  return rpcCall(nodeConfig, 'sendtoaddress', [address, amount]);
+export async function getNetworkHashPs(nodeConfig = null) {
+  return rpcCall(nodeConfig, 'getnetworkhashps');
+}
+
+// ── Wallet management (node-level, no wallet scope) ───────
+
+/**
+ * List all wallets loaded on the node.
+ * Returns string[] of wallet names, e.g. ["", "wanderer"]
+ */
+export async function listWallets(nodeConfig = null) {
+  return rpcCall(nodeConfig, 'listwallets');
+}
+
+/**
+ * Create a named wallet. Safe to call if already exists — catches the error.
+ * Returns true on success or already-exists, false on real failure.
+ */
+export async function createWallet(nodeConfig = null, walletName) {
+  try {
+    await rpcCall(nodeConfig, 'createwallet', [walletName]);
+    return true;
+  } catch (e) {
+    // "Wallet wanderer already exists" — not a real error
+    if (e.message?.toLowerCase().includes('already exist')) return true;
+    console.warn('[RPC] createWallet failed:', e.message);
+    return false;
+  }
 }
 
 // ══════════════════════════════════════════════════════════
-// MOCK DATA (dev/offline use — USE_MOCK = true to enable)
+// PUBLIC RPC METHODS — Wallet-scoped
+// These automatically use the right wallet path based on mode.
+// Pass wandererMode: true in nodeConfig to use named wallet scope.
+// ══════════════════════════════════════════════════════════
+
+function _walletName(nodeConfig) {
+  return nodeConfig?.wandererMode ? WANDERER_WALLET_NAME : null;
+}
+
+export async function getBalance(nodeConfig = null) {
+  return rpcCall(nodeConfig, 'getbalance', [], _walletName(nodeConfig));
+}
+
+export async function getBalances(nodeConfig = null) {
+  return rpcCall(nodeConfig, 'getbalances', [], _walletName(nodeConfig));
+}
+
+export async function listTransactions(nodeConfig = null, count = 20) {
+  return rpcCall(nodeConfig, 'listtransactions', ['*', count], _walletName(nodeConfig));
+}
+
+export async function getNewAddress(nodeConfig = null) {
+  return rpcCall(nodeConfig, 'getnewaddress', [], _walletName(nodeConfig));
+}
+
+export async function getWalletAddresses(nodeConfig = null) {
+  return rpcCall(nodeConfig, 'listreceivedbyaddress', [0, true], _walletName(nodeConfig));
+}
+
+export async function listReceivedByAddress(nodeConfig = null, minConf = 0, includeEmpty = true) {
+  return rpcCall(nodeConfig, 'listreceivedbyaddress', [minConf, includeEmpty], _walletName(nodeConfig));
+}
+
+export async function sendToAddress(nodeConfig = null, address, amount) {
+  return rpcCall(nodeConfig, 'sendtoaddress', [address, amount], _walletName(nodeConfig));
+}
+
+// ══════════════════════════════════════════════════════════
+// MOCK DATA
 // ══════════════════════════════════════════════════════════
 
 function getMockResponse(method) {
@@ -355,6 +377,8 @@ function getMockResponse(method) {
       connections_in:  1,
       connections_out: 3,
     },
+    listwallets:    ['', 'wanderer'],
+    createwallet:   { name: 'wanderer', warning: '' },
     getpeerinfo:    [],
     getrawmempool:  [],
     getdifficulty:  3.128,

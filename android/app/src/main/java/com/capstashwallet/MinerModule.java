@@ -178,6 +178,17 @@ public class MinerModule extends ReactContextBaseJavaModule {
             promise.reject("EXCEPTION", e.getMessage());
         }
     }
+    
+    // ── Required by NativeEventEmitter ────────────────────────────────────────
+    @ReactMethod
+    public void addListener(String eventName) {
+        // Required for NativeEventEmitter — no-op
+    }
+
+    @ReactMethod
+    public void removeListeners(int count) {
+        // Required for NativeEventEmitter — no-op
+    }
 
     // ── Event emitter helper ──────────────────────────────────────────────────
     private void sendEvent(String eventName, @Nullable WritableMap params) {
