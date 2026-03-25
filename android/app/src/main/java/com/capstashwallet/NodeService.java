@@ -74,10 +74,11 @@ public class NodeService extends Service {
             }
 
             String[] cmd = {
+                "/system/bin/linker64",
                 daemonFile.getAbsolutePath(),
                 "-datadir=" + dataDir.getAbsolutePath(),
                 "-conf="    + confFile.getAbsolutePath(),
-                "-daemon=0",       // run in foreground (we manage the process)
+                "-daemon=0",
                 "-server=1",
                 "-rpcuser=capstash",
                 "-rpcpassword=localnode",
@@ -85,12 +86,12 @@ public class NodeService extends Service {
                 "-rpcbind=127.0.0.1",
                 "-rpcallowip=127.0.0.1",
                 "-addnode=bitcoinii.ddns.net:9999",
-                "-listen=0",       // don't accept inbound P2P on mobile
+                "-listen=0",
                 "-maxconnections=8",
-                "-dbcache=64",     // limit RAM usage on mobile
-                "-par=2",          // limit CPU threads
-                "-prune=550",      // prune to 550MB to save storage
-                "-wallet=wanderer", // auto-load wanderer wallet on start
+                "-dbcache=64",
+                "-par=2",
+                "-prune=550",
+                "-wallet=wanderer"
             };
 
             Log.i(TAG, "Starting CapStashd: " + daemonFile.getAbsolutePath());
@@ -138,19 +139,27 @@ public class NodeService extends Service {
     }
 
     // ── Daemon extraction ──────────────────────────────────
-
     private File extractDaemon() {
-        // Android 10+ blocks executing from filesDir — use nativeLibraryDir instead.
-        // The binary is packaged as libcapstashd.so in jniLibs/arm64-v8a/
-        File destFile = new File(getApplicationInfo().nativeLibraryDir, "libcapstashd.so");
-
-        if (!destFile.exists()) {
-            Log.e(TAG, "libcapstashd.so not found in nativeLibraryDir: " + destFile.getAbsolutePath());
+        File srcFile = new File(getApplicationInfo().nativeLibraryDir, "libcapstashd.so");
+        if (!srcFile.exists()) {
+            Log.e(TAG, "libcapstashd.so not found: " + srcFile.getAbsolutePath());
             return null;
         }
-
-        // Ensure executable bit is set
-        destFile.setExecutable(true, false);
+        // Copy to codeCacheDir — this dir has the correct SELinux context for exec
+        File destFile = new File(getCodeCacheDir(), "capstashd");
+        try {
+            if (!destFile.exists() || srcFile.lastModified() > destFile.lastModified()) {
+                Log.i(TAG, "Copying CapStashd to codeCacheDir...");
+                java.nio.file.Files.copy(
+                    srcFile.toPath(), destFile.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                Log.i(TAG, "Copy complete");
+            }
+            destFile.setExecutable(true, false);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to copy capstashd: " + e.getMessage());
+            return null;
+        }
         Log.i(TAG, "CapStashd ready at: " + destFile.getAbsolutePath()
               + " (" + destFile.length() + " bytes)");
         return destFile;
