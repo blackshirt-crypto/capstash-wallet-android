@@ -118,35 +118,138 @@ export default function FieldManual({ visible, onClose }) {
           {/* ── CLASSIFIED EASTER EGG ── */}
           <View style={styles.section}>
             <View style={styles.classifiedBox}>
+
               <Text style={styles.classifiedTitle}>☢  CLASSIFIED — EYES ONLY  ☢</Text>
-              <Text style={styles.classifiedBody}>
-                You found it, wanderer.{'\n\n'}
-              </Text>
+              <Text style={styles.classifiedBody}>You found it, wanderer.</Text>
+
+              <View style={styles.classifiedDivider} />
+
               <Text style={styles.capTitle}>C.A.P.</Text>
+              <Text style={styles.capSubtitle}>Currency After Permanence</Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={styles.classifiedLore}>
+                April 20, 2069.{'\n'}
+                The bombs fell.{'\n'}
+                Every bank. Every government.{'\n'}
+                Every fiat currency —{'\n'}
+                burned with the cities.
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
               <Text style={styles.classifiedBody}>
-                {'\n'}CAP.....{'\n\n'}
+                Bitcoin survived the fire.{'\n'}
+                It could not survive the silence.
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={styles.classifiedLore}>
+                Not hacked. Not destroyed.{'\n'}
+                Built for permanent power grids,{'\n'}
+                humming datacenters, guaranteed uptime —{'\n'}
+                it fossilized when permanence died.
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={[styles.classifiedBody, { fontStyle: 'italic' }]}>
+                The soul was worth saving.
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={styles.classifiedLore}>
+                In the maintenance dark of Vault 1337,{'\n'}
+                a man known only as Elijah{'\n'}
+                found the corpse of that first chain —{'\n'}
+                and understood what Nakamoto got right,{'\n'}
+                and what the Wasteland would break again.
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={styles.classifiedKept}>Proof of work. Kept.</Text>
+              <Text style={styles.classifiedKept}>Permissionless. Enhanced.</Text>
+              <Text style={styles.classifiedKept}>Settlement Finality. Forever.</Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={styles.classifiedBody}>
+                One law added for the world that survived:
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={styles.classifiedLore}>
+                When the Wasteland goes dark —{'\n'}
+                when rigs go cold and power fails —{'\n'}
+                the chain does not die waiting.
+              </Text>
+              <Text style={[styles.classifiedBody, { marginTop: 6 }]}>
+                The Lottery Block breathes for it.
               </Text>
               <Text style={styles.classifiedLore}>
-                When the bombs fell on April 20, 2069, {'\n'}
-                every bank, every government, every fiat {'\n'}
-                currency burned with the cities{'\n'}
-                {'\n'}
-                -- ONE code survived, undiscovered for decades --{'\n'}
-                {'\n'}
-                Born again in Vault 1337, as before focused on{'\n'}
-                decentralization, trustless, unstoppable but with a{'\n'}
-                new capability! Nakamoto understood the original need.{'\n\n'}
-                A mysterious stranger found the answer for the Wasteland{'\n'}
-                ----CapStash his solution-----{'\n\n'}
+                Not a surrender of proof of work.{'\n'}
+                A lawful heartbeat written into consensus{'\n'}
+                for the times labor alone cannot carry the chain.
               </Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={[styles.classifiedKept, { fontStyle: 'italic' }]}>
+                He called it CapStash.
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={styles.classifiedLore}>
+                When the vaults opened and the Copperline{'\n'}
+                stretched wire across the broken world,{'\n'}
+                whispers of a figure known only as
+              </Text>
+              <Text style={[styles.classifiedBody, { letterSpacing: 2, marginTop: 6 }]}>
+                The Mysterious Stranger
+              </Text>
+              <Text style={styles.classifiedLore}>
+                began to circulate the Wasteland.
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={styles.classifiedLore}>
+                The chain runs on its own.{'\n'}
+                But his presence lingers —{'\n'}
+                felt in every block, every settlement,{'\n'}
+                every miner still grinding in the dark.
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
+              <Text style={styles.classifiedLore}>
+                Most believe it was built to outlast him.{'\n'}
+                Built to outlast what humanity{'\n'}
+                can do to itself.
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
               <Text style={styles.classifiedBody}>
-                The wasteland has a name{'\n'}
-                for what you're building.{'\n'}
-                Now you know it too.{'\n\n'}
+                You are holding —{'\n'}
+                and working toward —
               </Text>
+              <Text style={[styles.classifiedKept, { fontSize: 16, marginTop: 4 }]}>
+                the proof.
+              </Text>
+
+              <View style={styles.classifiedDivider} />
+
               <Text style={styles.classifiedFooter}>
-                — STAY SAFE, STACK CAPS, SURVIVE —
+                — STACK CAPS · STAY VIGILANT · SURVIVE —
               </Text>
+
             </View>
           </View>
 
@@ -248,6 +351,7 @@ const styles = StyleSheet.create({
   },
   aliasNoteText: { ...Typography.micro, color: Colors.greenDim, lineHeight: 18 },
 
+  // ── Classified Section ────────────────────────────────────────────────────
   classifiedBox: {
     borderWidth:     1,
     borderColor:     '#3a0a00',
@@ -265,6 +369,12 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 6,
   },
+  classifiedDivider: {
+    width:           '80%',
+    borderTopWidth:  1,
+    borderTopColor:  '#3a0a00',
+    marginVertical:  10,
+  },
   capTitle: {
     fontFamily:       Fonts.display,
     fontSize:         36,
@@ -275,11 +385,18 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 12,
   },
+  capSubtitle: {
+    ...Typography.small,
+    color:         Colors.green,
+    letterSpacing: 2,
+    textAlign:     'center',
+    marginTop:     4,
+  },
   classifiedBody: {
     ...Typography.small,
     color:         Colors.amber,
     textAlign:     'center',
-    lineHeight:    20,
+    lineHeight:    22,
     letterSpacing: 1,
   },
   classifiedLore: {
@@ -288,6 +405,13 @@ const styles = StyleSheet.create({
     textAlign:     'center',
     lineHeight:    20,
     letterSpacing: 0.5,
+  },
+  classifiedKept: {
+    ...Typography.small,
+    color:         Colors.green,
+    textAlign:     'center',
+    fontWeight:    'bold',
+    lineHeight:    22,
   },
   classifiedFooter: {
     ...Typography.micro,
