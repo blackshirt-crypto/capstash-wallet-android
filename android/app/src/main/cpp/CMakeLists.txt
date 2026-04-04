@@ -29,14 +29,18 @@ add_library(
     capstash_miner
     SHARED
 
-    # Whirlpool-512 PoW hash engine
+    # Whirlpool-512 PoW hash engine (SPH reference + optimized tables)
     whirlpool.c
+    sph_whirlpool.c
 
     # SHA-256 / SHA-256d — used for txid and merkle root (NOT for PoW)
     sha256.c
 
     # Minimal HTTP RPC client (getblocktemplate / submitblock / getbestblockhash)
     rpc.c
+
+    # Stratum protocol client (pool mining — compiled in, solo mode ignores it)
+    stratum.c
 
     # Mining loop — nonce iteration, header construction, thread management
     miner.c
