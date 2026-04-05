@@ -13,15 +13,16 @@ android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
-
     namespace "com.capstashwallet"
+
     defaultConfig {
         applicationId "com.capstashwallet"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "3.0"
+        versionCode 42069
+        versionName "4.20.69"
     }
+
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -29,17 +30,25 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            storeFile file('capstash-release.keystore')
+            storePassword 'Pocono96'
+            keyAlias 'capstash'
+            keyPassword 'Pocono96'
+        }
     }
+
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+
     externalNativeBuild {
         cmake {
             path "src/main/cpp/CMakeLists.txt"

@@ -71,3 +71,5 @@ android/app/src/main/cpp/*.c
 android/app/src/main/cpp/*.h
 Yellowtail-Regular.ttf
 Yellowtail-Regular.ttf
+android/app/src/main/jniLibs/arm64-v8a/libcapstashd.so
+android/app/src/main/jniLibs/arm64-v8a/libc++_shared.so
