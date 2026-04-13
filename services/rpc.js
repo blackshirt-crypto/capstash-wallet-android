@@ -297,7 +297,7 @@ export async function listWallets(nodeConfig = null) {
  */
 export async function createWallet(nodeConfig = null, walletName) {
   try {
-    await rpcCall(nodeConfig, 'createwallet', [walletName]);
+    await rpcCall(nodeConfig, 'createwallet', [walletName, false, false, '', false, false, false]); // legacy wallet — required for importprivkey
     return true;
   } catch (e) {
     // "Wallet wanderer already exists" — not a real error
@@ -343,6 +343,16 @@ export async function listReceivedByAddress(nodeConfig = null, minConf = 0, incl
 
 export async function sendToAddress(nodeConfig = null, address, amount) {
   return rpcCall(nodeConfig, 'sendtoaddress', [address, amount], _walletName(nodeConfig));
+}
+
+// Import a WIF private key into the wanderer wallet
+export async function importPrivKey(nodeConfig = null, wif, label = '', rescan = false) {
+  return rpcWalletCall(nodeConfig, 'importprivkey', [wif, label, rescan]);
+}
+
+// Dump the private key for a given address (used for backup/verify)
+export async function dumpPrivKey(nodeConfig = null, address) {
+  return rpcWalletCall(nodeConfig, 'dumpprivkey', [address]);
 }
 
 // ══════════════════════════════════════════════════════════

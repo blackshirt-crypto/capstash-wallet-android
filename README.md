@@ -1,79 +1,123 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# CapStash Wallet — Wallet of the Wasteland
 
-# Getting Started
+![Version](https://img.shields.io/badge/version-1.1.0-green)
+![Platform](https://img.shields.io/badge/platform-Android-green)
+![Network](https://img.shields.io/badge/network-CapStash%20Mainnet-orange)
 
->**Note**: Make sure you have completed the [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) instructions till "Creating a new application" step, before proceeding.
+> *Stack caps. Survive.*
 
-## Step 1: Start the Metro Server
+The official Android wallet for the CapStash (CAP) network. Built for the wasteland — rugged, self-sovereign, and mobile-first.
 
-First, you will need to start **Metro**, the JavaScript _bundler_ that ships _with_ React Native.
+---
 
-To start Metro, run the following command from the _root_ of your React Native project:
+## ⚠ COMMUNITY BETA — PLEASE READ
 
-```bash
-# using npm
-npm start
+This is a **public beta release** open to the CapStash community for testing.
 
-# OR using Yarn
-yarn start
-```
+- ✅ Feel free to install, explore, and test all features
+- ✅ Test wallet creation, seed phrase generation, and restore
+- ✅ Test Drifter mode with your home node via Tailscale
+- ⚠ **We strongly caution against storing significant CAP balances** until multiple community testers have validated the wallet across different devices
+- 🐛 Found a bug? Open a GitHub issue or report it in Discord
 
-## Step 2: Start your Application
+Your testing helps make this wallet battle-hardened for the wasteland. Every report counts.
 
-Let Metro Bundler run in its _own_ terminal. Open a _new_ terminal from the _root_ of your React Native project. Run the following command to start your _Android_ or _iOS_ app:
+---
 
-### For Android
+## 📱 Download
 
-```bash
-# using npm
-npm run android
+Grab the latest APK from the [Releases](../../releases) page and install it directly on your Android device.
 
-# OR using Yarn
-yarn android
-```
+> **Note:** You will need to enable "Install from unknown sources" in your Android settings since this is not distributed via the Play Store.
 
-### For iOS
+---
 
-```bash
-# using npm
-npm run ios
+## 🗺 Two Modes — Choose Your Path
 
-# OR using Yarn
-yarn ios
-```
+### ☢ DRIFTER MODE
+*For survivors with a home node already running.*
 
-If everything is set up _correctly_, you should see your new app running in your _Android Emulator_ or _iOS Simulator_ shortly provided you have set up your emulator/simulator correctly.
+Drifter mode connects your phone wallet to an existing CapStash Qt node running on your home network or PC. All blockchain data stays on your node — your phone is a remote control.
 
-This is one way to run your app — you can also run it directly from within Android Studio and Xcode respectively.
+- Requires a running CapStash node (Qt wallet or daemon)
+- Connects via **Tailscale VPN** for secure remote access
+- No blockchain download on your phone
+- Lightweight and fast
 
-## Step 3: Modifying your App
+> Full Tailscale setup guide and node configuration details will be provided in an upcoming release. Stay tuned in Discord.
 
-Now that you have successfully run the app, let's modify it.
+---
 
-1. Open `App.tsx` in your text editor of choice and edit some lines.
-2. For **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (on Window and Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (on macOS)) to see your changes!
+### ☢ WANDERER MODE
+*For survivors who carry everything with them.*
 
-   For **iOS**: Hit <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> in your iOS Simulator to reload the app and see your changes!
+Wanderer mode runs a **full CapStash node directly on your Android device**. No home node required — completely self-contained.
 
-## Congratulations! :tada:
+- Downloads and syncs the full CapStash blockchain on-device
+- Generates a **BIP39 seed phrase** on first launch — write it down!
+- Your seed phrase can restore your wallet on any device
+- Includes integrated CPU miner
+- Requires more storage and battery than Drifter mode
 
-You've successfully run and modified your React Native App. :partying_face:
+---
 
-### Now what?
+## 🔑 Seed Phrase — Your Most Important Backup
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
+When setting up Wanderer mode for the first time, the wallet generates a **12-word BIP39 seed phrase**.
 
-# Troubleshooting
+- **Write down all 12 words in order and store them safely**
+- This is the only way to recover your wallet if you lose your device
+- The wallet will verify you wrote it down before continuing
+- Nobody can recover your seed phrase for you — not us, not anyone
 
-If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+> Already have a seed phrase? Use the **[ ALREADY HAVE A SEED PHRASE? RESTORE ]** option on the setup screen to restore your existing wallet.
 
-# Learn More
+---
 
-To learn more about React Native, take a look at the following resources:
+## ⛏ Built-in Miner
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+Both modes include access to the **P.B.G. (Portable Blockchain Generator)** — the integrated CPU miner. Mine CAP directly from your phone and monitor your hashrate in real time.
+
+---
+
+## 🌐 Network Info
+
+| Property | Value |
+|----------|-------|
+| Coin | CapStash (CAP) |
+| Algorithm | Whirlpool-512 XOR/256 |
+| Block Reward | 1 CAP |
+| Block Time | 60 seconds |
+| Network | Mainnet |
+
+---
+
+## 📢 Community
+
+Join the CapStash community on Discord to share feedback, report bugs, and connect with other survivors.
+
+*Details in the Discord announcement.*
+
+---
+
+## 📋 Changelog
+
+### v1.1.0
+- BIP39 seed phrase generation on first Wanderer launch
+- BIP32 HD key derivation — seed phrase now deterministically controls wallet
+- Seed phrase restore flow — recover your wallet on any device
+- Legacy wallet support for full key import compatibility
+- Address identity toggle — switch between wasteland name and raw address
+- IP address hide/show in setup menu
+- Wanderer wallet persistence fix across mode switches
+
+### v1.0.0 — DRIFTER
+- Drifter mode — remote Qt node control via Tailscale
+- Integrated CPU miner
+- Block explorer
+- Network monitor
+- Solo mining screen
+
+---
+
+*Wallet of the Wasteland · Stack caps. Survive.*

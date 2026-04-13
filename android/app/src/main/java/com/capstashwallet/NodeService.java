@@ -82,6 +82,7 @@ public class NodeService extends Service {
                 "-server=1",
                 "-rpcuser=capstash",
                 "-rpcpassword=localnode",
+                "-rpccookiefile=/dev/null",
                 "-rpcport=8332",
                 "-rpcbind=127.0.0.1",
                 "-rpcallowip=127.0.0.1",
@@ -91,7 +92,8 @@ public class NodeService extends Service {
                 "-dbcache=64",
                 "-par=2",
                 "-prune=550",
-                "-wallet=wanderer"
+                "-wallet=wanderer",
+                "-deprecatedrpc=create_bdb"
             };
 
             Log.i(TAG, "Starting CapStashd: " + daemonFile.getAbsolutePath());
@@ -126,6 +128,7 @@ public class NodeService extends Service {
                     new File(getFilesDir(), DAEMON_NAME).getAbsolutePath(),
                     "-rpcuser=capstash",
                     "-rpcpassword=localnode",
+                    "-rpccookiefile=/dev/null",
                     "-rpcport=8332",
                     "stop"
                 });
@@ -179,6 +182,7 @@ public class NodeService extends Service {
         String conf =
             "server=1\n" +
             "rpcuser=capstash\n" +
+            "rpccookiefile=/dev/null\n" +
             "rpcpassword=localnode\n" +
             "rpcport=8332\n" +
             "rpcallowip=127.0.0.1\n" +

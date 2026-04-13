@@ -345,7 +345,7 @@ export default function SetupMenu({
                       placeholderTextColor={Colors.greenDim}
                       autoCapitalize="none"
                       autoCorrect={false}
-                      keyboardType="url"
+                      keyboardType={showIp ? "url" : "default"}
                       secureTextEntry={!showIp}
                     />
                     <TouchableOpacity style={styles.togglePassBtn} onPress={() => setShowIp(p => !p)}>

@@ -35,6 +35,7 @@ export default function WalletScreen({ nodeConfig, isOnline, appMode, walletRead
   const [refreshing,   setRefreshing]   = useState(false);
   const [showAllTx,    setShowAllTx]    = useState(false);
   const [balanceHidden,setBalanceHidden]= useState(false);
+  const [showIdentity, setShowIdentity] = useState(true);
 
   // ── Receive modal ───────────────────────────────────────
   const [showReceive, setShowReceive] = useState(false);
@@ -236,7 +237,10 @@ export default function WalletScreen({ nodeConfig, isOnline, appMode, walletRead
           {myAddress ? (
             <View style={styles.identityRow}>
               <Text style={styles.verifiedIcon}>☢ </Text>
-              <TierName address={myAddress} size="large" showVerified={false} />
+              {showIdentity
+                ? <TierName address={myAddress} size="large" showVerified={false} />
+                : <Text style={styles.rawAddress} selectable>{myAddress}</Text>
+              }
               <Text style={styles.verifiedIcon}> ☢</Text>
             </View>
           ) : (
@@ -247,6 +251,11 @@ export default function WalletScreen({ nodeConfig, isOnline, appMode, walletRead
             </View>
           )}
 
+          <TouchableOpacity onPress={() => setShowIdentity(p => !p)} style={styles.identityToggle}>
+            <Text style={styles.identityToggleText}>
+              {showIdentity ? '[ SHOW RAW ADDRESS ]' : '[ SHOW IDENTITY ]'}
+            </Text>
+          </TouchableOpacity>
           <Text style={styles.preWarText}>~ pre "great war" value unknown</Text>
 
           <View style={styles.actionRow}>
@@ -634,6 +643,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center', marginTop: 6, marginBottom: 4,
   },
   verifiedIcon: { color: Colors.greenDim, fontSize: 14 },
+  identityToggle: {
+    alignSelf:     'center',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginTop:     4,
+    borderWidth:   1,
+    borderColor:   Colors.borderDim,
+  },
+  identityToggleText: {
+    fontFamily:    'ShareTechMono',
+    fontSize:      9,
+    color:         Colors.greenDim,
+    letterSpacing: 1,
+  },
+  rawAddress: {
+    fontFamily:    'ShareTechMono',
+    fontSize:      11,
+    color:         Colors.green,
+    letterSpacing: 1,
+    textAlign:     'center',
+    flex:          1,
+  },
   addressLoading: {
     fontFamily: 'ShareTechMono', fontSize: 12,
     color: Colors.greenDim, letterSpacing: 1,

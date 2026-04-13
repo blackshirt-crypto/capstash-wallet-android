@@ -5,14 +5,15 @@
 // Once created, a flag is persisted so we never call createwallet again.
 //
 // Flow:
-//   ensureWandererWallet(nodeConfig)
+//   ensureWandererWallet(nodeConfig, mnemonic)
 //     1. Check AsyncStorage flag — if set, wallet already exists, just load address
 //     2. Call listwallets — if "wanderer" already in list, set flag + load address
-//     3. Call createwallet("wanderer") — set flag + get fresh address
+//     3. Call createwallet("wanderer") — derive WIF from mnemonic, importprivkey
 //     4. Return { ready: true, address } or { ready: false, error }
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { listWallets, createWallet, getNewAddress, getWalletAddresses } from './rpc';
+import { listWallets, createWallet, getNewAddress, getWalletAddresses, importPrivKey } from './rpc';
+import { deriveWIFFromMnemonic, deriveLegacyAddressFromMnemonic } from './seedDerivation';
 import { WANDERER_NODE_CONFIG } from './appMode';
 
 const WANDERER_WALLET_INIT_KEY    = '@capstash_wanderer_wallet_init';
@@ -25,7 +26,7 @@ const WANDERER_WALLET_ADDRESS_KEY = '@capstash_wanderer_wallet_address';
  * @param {object} nodeConfig — should be WANDERER_NODE_CONFIG (127.0.0.1)
  * @returns {{ ready: boolean, address: string|null, error: string|null }}
  */
-export async function ensureWandererWallet(nodeConfig) {
+export async function ensureWandererWallet(nodeConfig, mnemonic = null) {
   const cfg = nodeConfig || WANDERER_NODE_CONFIG;
 
   try {
@@ -69,16 +70,33 @@ export async function ensureWandererWallet(nodeConfig) {
       };
     }
 
-    // ── Step 4: Get initial address ──────────────────────────
+    // ── Step 4: Import derived private key from mnemonic ────
     const wandererConfig = { ...cfg, wandererMode: true };
     let address = null;
-    try {
-      address = await getNewAddress(wandererConfig);
-      if (address) {
+    if (mnemonic) {
+      try {
+        const wif = await deriveWIFFromMnemonic(mnemonic);
+        await importPrivKey(wandererConfig, wif, 'wanderer-seed', false);
+        console.log('[walletManager] Derived key imported from mnemonic');
+        // Use the address derived from the seed — not a fresh random address
+        address = deriveLegacyAddressFromMnemonic(mnemonic);
+        console.log('[walletManager] Derived legacy address:', address);
         await AsyncStorage.setItem(WANDERER_WALLET_ADDRESS_KEY, address);
+      } catch (e) {
+        console.warn('[walletManager] importPrivKey failed:', e.message);
       }
-    } catch (e) {
-      console.warn('[walletManager] getNewAddress after createWallet failed:', e.message);
+    }
+
+    // ── Step 5: Get initial address (fallback if no mnemonic) ─
+    if (!address) {
+      try {
+        address = await getNewAddress(wandererConfig);
+        if (address) {
+          await AsyncStorage.setItem(WANDERER_WALLET_ADDRESS_KEY, address);
+        }
+      } catch (e) {
+        console.warn('[walletManager] getNewAddress after createWallet failed:', e.message);
+      }
     }
 
     await AsyncStorage.setItem(WANDERER_WALLET_INIT_KEY, 'true');

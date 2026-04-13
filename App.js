@@ -13,10 +13,14 @@ import MinerScreen      from './screens/MinerScreen';
 import ExplorerScreen   from './screens/ExplorerScreen';
 import NetworkScreen    from './screens/NetworkScreen';
 import SoloScreen       from './screens/SoloScreen';
-import ModeSelectScreen from './screens/ModeSelectScreen';
+import ModeSelectScreen    from './screens/ModeSelectScreen';
+import SeedGenerateScreen  from './screens/SeedGenerateScreen';
+import SeedVerifyScreen    from './screens/SeedVerifyScreen';
+import SeedRestoreScreen   from './screens/SeedRestoreScreen';
 import FieldManual      from './components/FieldManual';
 import SetupMenu        from './components/Setupmenu';
 import { getBlockCount, getMiningInfo, getBlockchainInfo, loadNodeConfig } from './services/rpc';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   setAppMode as persistMode, clearAppMode, loadAppMode,
   MODE_WANDERER, MODE_DRIFTER, WANDERER_NODE_CONFIG,
@@ -54,6 +58,8 @@ export default function App() {
   const [nodeConfig,  setNodeConfig]  = useState(DEFAULT_NODE);
   const [appMode,     setAppMode]     = useState(null);
   const [configReady, setConfigReady] = useState(false);
+  const [seedPhase,   setSeedPhase]   = useState(null);
+  const [pendingSeed, setPendingSeed] = useState(null);
 
   // ── Wanderer wallet state ──────────────────────────────
   const [walletAddress, setWalletAddress] = useState(null);
@@ -106,7 +112,7 @@ export default function App() {
   // Does NOT block the UI. Wallet screen loads immediately.
   // ensureWandererWallet runs after a 5s delay to give capstashd time to start.
   useEffect(() => {
-    if (appMode !== MODE_WANDERER || !configReady) return;
+    if (appMode !== MODE_WANDERER || !configReady || seedPhase !== null) return;
 
     const wandererCfg = {
       ip:           WANDERER_NODE_CONFIG.host,
@@ -122,7 +128,7 @@ export default function App() {
     startNode()
       .catch(e => console.warn('[App] startNode error:', e.message))
       .then(() => new Promise(resolve => setTimeout(resolve, 5000)))
-      .then(() => ensureWandererWallet(wandererCfg))
+      .then(() => ensureWandererWallet(wandererCfg, pendingSeed))
       .then(result => {
         console.log('[App] ensureWandererWallet result:', JSON.stringify(result));
         if (result.ready) {
@@ -136,10 +142,24 @@ export default function App() {
       })
       .catch(e => console.error('[App] Wanderer boot error:', e.message));
 
-  }, [appMode, configReady]);
+  }, [appMode, configReady, seedPhase, pendingSeed]);
 
   // ── Handle mode selection ──────────────────────────────
   const handleModeSelected = async (mode) => {
+    if (mode === MODE_WANDERER) {
+      // Check if wanderer wallet was already created before
+      const alreadyInit = await AsyncStorage.getItem('@capstash_wanderer_wallet_init');
+      if (alreadyInit === 'true') {
+        // Wallet exists — skip seed flow, go straight to main app
+        await persistMode(MODE_WANDERER);
+        setAppMode(MODE_WANDERER);
+        return;
+      }
+      // First time Wanderer — go through seed phrase flow before booting
+      setSeedPhase('generate');
+      setAppMode(MODE_WANDERER);
+      return;
+    }
     await persistMode(mode);
     if (mode === MODE_DRIFTER) {
       setWalletAddress(null);
@@ -241,6 +261,53 @@ export default function App() {
           <StatusBar barStyle="dark-content" backgroundColor={Colors.black} />
           <ModeSelectScreen onModeSelected={handleModeSelected} />
         </NavigationContainer>
+      </SafeAreaProvider>
+    );
+  }
+
+  if (seedPhase === 'generate') {
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="dark-content" backgroundColor={Colors.black} />
+        <SeedGenerateScreen
+          onSeedConfirmed={(mnemonic) => {
+            setPendingSeed(mnemonic);
+            setSeedPhase('verify');
+          }}
+          onRestoreInstead={() => setSeedPhase('restore')}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (seedPhase === 'verify') {
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="dark-content" backgroundColor={Colors.black} />
+        <SeedVerifyScreen
+          mnemonic={pendingSeed}
+          onBack={() => setSeedPhase('generate')}
+          onVerified={async () => {
+            await persistMode(MODE_WANDERER);
+            setSeedPhase(null);
+          }}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (seedPhase === 'restore') {
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="dark-content" backgroundColor={Colors.black} />
+        <SeedRestoreScreen
+          onBack={() => setSeedPhase('generate')}
+          onSeedRestored={async (mnemonic) => {
+            setPendingSeed(mnemonic);
+            await persistMode(MODE_WANDERER);
+            setSeedPhase(null);
+          }}
+        />
       </SafeAreaProvider>
     );
   }
