@@ -1,6 +1,6 @@
 # CapStash Wallet — Wallet of the Wasteland
 
-![Version](https://img.shields.io/badge/version-1.1.0-green)
+![Version](https://img.shields.io/badge/version-4.20.69-green)
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Network](https://img.shields.io/badge/network-CapStash%20Mainnet-orange)
 
@@ -102,7 +102,7 @@ Join the CapStash community on Discord to share feedback, report bugs, and conne
 
 ## 📋 Changelog
 
-### v1.1.0
+### v4.20.69
 - BIP39 seed phrase generation on first Wanderer launch
 - BIP32 HD key derivation — seed phrase now deterministically controls wallet
 - Seed phrase restore flow — recover your wallet on any device
