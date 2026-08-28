@@ -125,7 +125,7 @@ public class NodeService extends Service {
             try {
                 // Send stop command via RPC first for clean shutdown
                 Runtime.getRuntime().exec(new String[]{
-                    new File(getFilesDir(), DAEMON_NAME).getAbsolutePath(),
+                    new File(getCodeCacheDir(), "capstashd").getAbsolutePath(),
                     "-rpcuser=capstash",
                     "-rpcpassword=localnode",
                     "-rpccookiefile=/dev/null",

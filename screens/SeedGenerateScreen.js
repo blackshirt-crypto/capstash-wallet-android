@@ -7,7 +7,8 @@ import {
 } from 'react-native';
 import { Buffer } from 'buffer';
 global.Buffer = Buffer;
-import * as bip39 from 'bip39';
+import { generateMnemonic } from '@scure/bip39';
+import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english';
 import Colors from '../theme/colors';
 
 export default function SeedGenerateScreen({ onSeedConfirmed, onRestoreInstead }) {
@@ -16,7 +17,7 @@ export default function SeedGenerateScreen({ onSeedConfirmed, onRestoreInstead }
   const [revealed, setRevealed] = useState(false);
 
   useEffect(() => {
-    const m = bip39.generateMnemonic(128); // 12 words
+    const m = generateMnemonic(englishWordlist); // 12 words
     setMnemonic(m);
     setWords(m.split(' '));
   }, []);
