@@ -87,6 +87,7 @@ public class NodeService extends Service {
                 "-rpcbind=127.0.0.1",
                 "-rpcallowip=127.0.0.1",
                 "-addnode=bitcoinii.ddns.net:9999",
+                "-addnode=172.245.139.245:9999", // RackNerd public node
                 "-listen=0",
                 "-maxconnections=8",
                 "-dbcache=64",
@@ -188,6 +189,7 @@ public class NodeService extends Service {
             "rpcallowip=127.0.0.1\n" +
             "rpcbind=127.0.0.1\n" +
             "addnode=bitcoinii.ddns.net:9999\n" +
+            "addnode=172.245.139.245:9999\n" + // RackNerd public node
             "listen=0\n" +
             "maxconnections=8\n" +
             "dbcache=64\n" +
