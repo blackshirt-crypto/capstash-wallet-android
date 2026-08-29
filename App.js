@@ -18,7 +18,7 @@ import SeedGenerateScreen  from './screens/SeedGenerateScreen';
 import SeedVerifyScreen    from './screens/SeedVerifyScreen';
 import SeedRestoreScreen   from './screens/SeedRestoreScreen';
 import FieldManual      from './components/FieldManual';
-import SetupMenu        from './components/Setupmenu';
+import SetupMenu        from './components/SetupMenu';
 import { getBlockCount, getMiningInfo, getBlockchainInfo, loadNodeConfig } from './services/rpc';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
