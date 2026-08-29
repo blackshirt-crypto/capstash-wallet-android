@@ -19,8 +19,8 @@ android {
         applicationId "com.capstashwallet"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 42069
-        versionName "4.20.69"
+        versionCode 42100
+        versionName "4.21.0"
     }
 
     signingConfigs {
