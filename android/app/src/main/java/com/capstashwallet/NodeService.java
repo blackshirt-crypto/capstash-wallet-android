@@ -58,6 +58,7 @@ public class NodeService extends Service {
     private void startNode() {
         try {
             File daemonFile = extractDaemon();
+            extractPeers();
             if (daemonFile == null) {
                 Log.e(TAG, "Failed to extract CapStashd");
                 updateNotification("NODE ERROR — EXTRACTION FAILED");
@@ -86,18 +87,15 @@ public class NodeService extends Service {
                 "-rpcport=8332",
                 "-rpcbind=127.0.0.1",
                 "-rpcallowip=127.0.0.1",
-                "-addnode=bitcoinii.ddns.net:9999",
-                "-addnode=172.245.139.245:9999", // RackNerd public node
-                "-addnode=212.43.147.158:9999",
-                "-addnode=204.168.162.29:9999",
-                "-addnode=50.6.6.41:9999",
-                "-addnode=129.121.76.126:9999",
-                "-addnode=78.83.102.26:9999",
-                "-listen=0",
-                "-maxconnections=8",
+                
+                "-addnode=172.245.139.245:9999", // RackNerd — primary seed
+                
+                
+                
+                
+                
                 "-dbcache=64",
                 "-par=2",
-                "-prune=550",
                 "-wallet=wanderer",
                 "-deprecatedrpc=create_bdb"
             };
@@ -148,6 +146,25 @@ public class NodeService extends Service {
     }
 
     // ── Daemon extraction ──────────────────────────────────
+    private void extractPeers() {
+        File dataDir = getNodeDataDir();
+        File peersFile = new File(dataDir, "peers.dat");
+        if (peersFile.exists()) return; // don't overwrite built-up peer list
+        try {
+            dataDir.mkdirs();
+            java.io.InputStream is = getAssets().open("peers.dat");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(peersFile);
+            byte[] buf = new byte[4096];
+            int len;
+            while ((len = is.read(buf)) > 0) fos.write(buf, 0, len);
+            fos.close();
+            is.close();
+            Log.i(TAG, "peers.dat extracted to: " + peersFile.getAbsolutePath());
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to extract peers.dat: " + e.getMessage());
+        }
+    }
+
     private File extractDaemon() {
         File srcFile = new File(getApplicationInfo().nativeLibraryDir, "libcapstashd.so");
         if (!srcFile.exists()) {
@@ -193,18 +210,15 @@ public class NodeService extends Service {
             "rpcport=8332\n" +
             "rpcallowip=127.0.0.1\n" +
             "rpcbind=127.0.0.1\n" +
-            "addnode=bitcoinii.ddns.net:9999\n" +
-            "addnode=172.245.139.245:9999\n" + // RackNerd public node
-            "addnode=212.43.147.158:9999\n" +
-            "addnode=204.168.162.29:9999\n" +
-            "addnode=50.6.6.41:9999\n" +
-            "addnode=129.121.76.126:9999\n" +
-            "addnode=78.83.102.26:9999\n" +
-            "listen=0\n" +
-            "maxconnections=8\n" +
+            
+            "addnode=172.245.139.245:9999\n" + // RackNerd — primary seed
+            
+            
+            
+            
+            
             "dbcache=64\n" +
             "par=2\n" +
-            "prune=550\n" +
             "wallet=wanderer\n";
 
         try (FileOutputStream fos = new FileOutputStream(confFile)) {
